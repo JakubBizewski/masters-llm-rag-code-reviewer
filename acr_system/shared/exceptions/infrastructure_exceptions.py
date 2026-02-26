@@ -29,3 +29,8 @@ class ConfigLoadError(InfrastructureException):
 class CIFetchError(InfrastructureException):
     """Error fetching CI results."""
     pass
+
+
+class ASTParseError(InfrastructureException):
+    """Error parsing code with AST parser."""
+    pass

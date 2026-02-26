@@ -6,12 +6,12 @@ Lista zadań do ukończenia, aby system był w 100% gotowy do produkcji.
 
 ### Infrastructure Layer - Brakujące Adaptery
 
-- [ ] **YAML Config Loader** - `infrastructure/config/yaml_config_loader.py`
-  - Implementacja `ConfigRepository` interface
-  - Ładowanie `.acr-config.yml` z repozytorium przez VCS API
-  - Parsowanie YAML do `ProjectConfig`
-  - Walidacja konfiguracji
-  - Cache'owanie konfiguracji
+- [x] **YAML Config Loader** - `infrastructure/config/yaml_config_loader.py`
+  - ✅ Implementacja `ConfigRepository` interface
+  - ✅ Ładowanie `.acr-config.yml` z repozytorium przez VCS API
+  - ✅ Parsowanie YAML do `ProjectConfig`
+  - ✅ Walidacja konfiguracji
+  - ⚠️ Cache'owanie konfiguracji (optional dla MVP)
 
 - [ ] **GitLab Adapter** - `infrastructure/vcs/gitlab_adapter.py`
   - Implementacja `VCSRepository` dla GitLab
@@ -42,22 +42,22 @@ Lista zadań do ukończenia, aby system był w 100% gotowy do produkcji.
 
 ### AST Parsing (Tree-sitter)
 
-- [ ] **AST Parser Interface** - `ast/parser.py`
-  - Definicja `ASTParser` port
-  - Metody do parsowania kodu
-  - Ekstrakcja funkcji, klas, importów
+- [x] **AST Parser Interface** - `ast/parser.py`
+  - ✅ Definicja `ASTParser` port
+  - ✅ Metody do parsowania kodu
+  - ✅ Ekstrakcja funkcji, klas, importów
 
-- [ ] **Tree-sitter Adapter** - `ast/tree_sitter_adapter.py`
-  - Implementacja parsera używając tree-sitter
-  - Inicjalizacja parserów dla różnych języków
-  - Testy
+- [x] **Tree-sitter Adapter** - `ast/tree_sitter_adapter.py`
+  - ✅ Implementacja parsera używając tree-sitter
+  - ✅ Inicjalizacja parserów dla różnych języków
+  - ✅ Testy
 
-- [ ] **Language Strategies** - `ast/strategies/`
-  - `python_strategy.py` - strategia dla Python
-  - `javascript_strategy.py` - strategia dla JavaScript
-  - `typescript_strategy.py` - strategia dla TypeScript
-  - `go_strategy.py` - strategia dla Go
-  - Language registry (OCP - Open/Closed Principle)
+- [x] **Language Strategies** - `ast/strategies/`
+  - ✅ `python_strategy.py` - strategia dla Python
+  - ✅ `javascript_strategy.py` - strategia dla JavaScript
+  - ✅ `typescript_strategy.py` - strategia dla TypeScript
+  - ✅ `go_strategy.py` - strategia dla Go
+  - ✅ Language registry (OCP - Open/Closed Principle)
 
 ### Security
 
