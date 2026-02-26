@@ -1,7 +1,7 @@
 """Domain entities for the ACR system."""
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, List
+from typing import List, Optional, Set
 from uuid import UUID, uuid4
 
 from acr_system.domain.value_objects.value_objects import FilePath, Language, Severity
@@ -11,13 +11,13 @@ from acr_system.domain.value_objects.value_objects import FilePath, Language, Se
 class DiffHunk:
     """Fragment of code change in a file."""
     
-    id: UUID = field(default_factory=uuid4)
     file_path: FilePath
     old_start_line: int
     old_line_count: int
     new_start_line: int
     new_line_count: int
     content: str  # Raw diff content
+    id: UUID = field(default_factory=uuid4)
     context_before: str = ""  # Code context before the hunk
     context_after: str = ""  # Code context after the hunk
     
@@ -43,11 +43,11 @@ class DiffHunk:
 class ReviewComment:
     """Code review comment."""
     
-    id: UUID = field(default_factory=uuid4)
     file_path: FilePath
     line_number: Optional[int]
     severity: Severity
     message: str
+    id: UUID = field(default_factory=uuid4)
     suggestion: Optional[str] = None
     rule_name: Optional[str] = None  # Which rule triggered this comment
     created_at: datetime = field(default_factory=datetime.utcnow)
@@ -116,7 +116,7 @@ class CIToolResult:
     tool_name: str  # "Ruff", "mypy", "ESLint", "pytest"
     status: str  # "success", "failure", "warning"
     raw_output: str  # Full output from tool (text or JSON)
-    files_mentioned: set[str]  # Files mentioned in output (best effort parsing)
+    files_mentioned: Set[str]  # Files mentioned in output (best effort parsing)
     conclusion: str  # "passed", "failed", "skipped"
     
     def __post_init__(self) -> None:
@@ -163,7 +163,6 @@ class ArchitecturalDocument:
 class PullRequest:
     """Pull Request / Merge Request entity."""
     
-    id: UUID = field(default_factory=uuid4)
     pr_number: int
     repository: str  # "owner/repo"
     title: str
@@ -171,9 +170,10 @@ class PullRequest:
     author: str
     source_branch: str
     target_branch: str
-    diff_hunks: list[DiffHunk] = field(default_factory=list)
-    ci_results: list[CIToolResult] = field(default_factory=list)
-    review_comments: list[ReviewComment] = field(default_factory=list)
+    id: UUID = field(default_factory=uuid4)
+    diff_hunks: List[DiffHunk] = field(default_factory=list)
+    ci_results: List[CIToolResult] = field(default_factory=list)
+    review_comments: List[ReviewComment] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.utcnow)
     
     def __post_init__(self) -> None:
@@ -197,16 +197,16 @@ class PullRequest:
         self.review_comments.append(comment)
     
     @property
-    def changed_files(self) -> set[str]:
+    def changed_files(self) -> Set[str]:
         """Get set of all changed files."""
         return {hunk.file_path.value for hunk in self.diff_hunks}
     
     @property
-    def languages(self) -> set[Language]:
+    def languages(self) -> Set[Language]:
         """Get set of all programming languages in the PR."""
         return {hunk.language for hunk in self.diff_hunks}
     
-    def get_hunks_for_file(self, file_path: str) -> list[DiffHunk]:
+    def get_hunks_for_file(self, file_path: str) -> List[DiffHunk]:
         """Get all hunks for a specific file."""
         return [hunk for hunk in self.diff_hunks if hunk.file_path.value == file_path]
 

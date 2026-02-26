@@ -96,12 +96,12 @@ Lista zadań do ukończenia, aby system był w 100% gotowy do produkcji.
   - ✅ Context extraction (5 linii wokół call site)
   - ✅ NO LLM dependency - pure technical analysis
 
-- [ ] **Impact Analyzer Adapter** - `infrastructure/analysis/impact_analyzer.py`
-  - Implementacja `ImpactAnalyzer` używając LLM
-  - Requires `LLMProvider` dependency (injected)
-  - LLM prompt building dla impact analysis
-  - Parse LLM response (JSON) → ImpactAnalysisResult
-  - Breaking change detection + fix suggestions
+- [x] **Impact Analyzer Adapter** - `infrastructure/analysis/llm_impact_analyzer.py`
+  - ✅ Implementacja `ImpactAnalyzer` używając LLM
+  - ✅ Requires `LLMProvider` dependency (injected)
+  - ✅ LLM prompt building dla impact analysis
+  - ✅ Parse LLM response (JSON) → ImpactAnalysisResult
+  - ✅ Breaking change detection + fix suggestions
 
 - [ ] **Integration z ReviewOrchestrator**
   - Extend `conduct_review()` o impact analysis flow

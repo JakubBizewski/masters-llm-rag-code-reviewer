@@ -33,7 +33,7 @@ class LanguageRegistry:
             strategy: Instancja strategii dla języka
         """
         cls._strategies[language] = strategy
-        logger.debug(f"Registered strategy for {language.value}: {strategy.__class__.__name__}")
+        logger.debug(f"Registered strategy for {language.name}: {strategy.__class__.__name__}")
     
     @classmethod
     def get_strategy(cls, language: Language) -> Optional[LanguageStrategy]:
@@ -84,10 +84,10 @@ def register_builtin_languages() -> None:
     from acr_system.ast.strategies.python_strategy import PythonLanguageStrategy
     from acr_system.ast.strategies.typescript_strategy import TypeScriptLanguageStrategy
     
-    LanguageRegistry.register(Language.PYTHON, PythonLanguageStrategy())
-    LanguageRegistry.register(Language.JAVASCRIPT, JavaScriptLanguageStrategy())
-    LanguageRegistry.register(Language.TYPESCRIPT, TypeScriptLanguageStrategy())
-    LanguageRegistry.register(Language.GO, GoLanguageStrategy())
+    LanguageRegistry.register(Language(name="python"), PythonLanguageStrategy())
+    LanguageRegistry.register(Language(name="javascript"), JavaScriptLanguageStrategy())
+    LanguageRegistry.register(Language(name="typescript"), TypeScriptLanguageStrategy())
+    LanguageRegistry.register(Language(name="go"), GoLanguageStrategy())
     
     logger.info(f"Registered {len(LanguageRegistry.list_supported())} language strategies")
 

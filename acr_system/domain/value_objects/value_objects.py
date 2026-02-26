@@ -1,7 +1,7 @@
 """Value objects for the Domain layer."""
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -148,8 +148,8 @@ class RAGConfig:
     
     enabled: bool = True
     top_k: int = 5
-    documentation_paths: list[str] = None  # type: ignore
-    architectural_docs: list[str] = None  # type: ignore
+    documentation_paths: Optional[List[str]] = None
+    architectural_docs: Optional[List[str]] = None
     
     def __post_init__(self) -> None:
         if self.documentation_paths is None:
@@ -204,7 +204,7 @@ class ImportSite:
     file_path: FilePath
     line_number: int
     imported_module: str  # Name of imported module (e.g., "auth", "utils.helpers")
-    imported_names: tuple[str, ...]  # Imported names (functions, classes) - tuple for immutability
+    imported_names: Tuple[str, ...]  # Imported names (functions, classes) - tuple for immutability
     context: str  # Import statement with surrounding context
     
     def __post_init__(self) -> None:
@@ -282,7 +282,7 @@ class ImpactAnalysisResult:
         """Get the maximum severity of detected breaking changes."""
         if not self.breaking_changes:
             return None
-        return max(bc.severity for bc in self.breaking_changes, key=lambda s: s.priority)
+        return max((bc.severity for bc in self.breaking_changes), key=lambda s: s.priority)
     
     @property
     def total_affected_sites(self) -> int:

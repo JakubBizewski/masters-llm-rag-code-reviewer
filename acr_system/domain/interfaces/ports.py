@@ -1,6 +1,6 @@
 """Domain interfaces (Ports) for infrastructure adapters."""
 from abc import ABC, abstractmethod
-from typing import Optional, List
+from typing import Dict, List, Optional, Set, Tuple
 
 from acr_system.domain.entities.entities import (
     ArchitecturalDocument,
@@ -31,7 +31,7 @@ class VCSRepository(ABC):
         pass
     
     @abstractmethod
-    async def get_diff_hunks(self, repo: str, pr_number: int) -> list[DiffHunk]:
+    async def get_diff_hunks(self, repo: str, pr_number: int) -> List[DiffHunk]:
         """Fetch diff hunks for a PR."""
         pass
     
@@ -50,7 +50,7 @@ class VCSRepository(ABC):
         self,
         repo: str,
         pr_number: int,
-        comments: list[ReviewComment],
+        comments: List[ReviewComment],
     ) -> None:
         """Post multiple review comments to the PR."""
         pass
@@ -74,11 +74,11 @@ class LLMProvider(ABC):
         self,
         diff_hunk: DiffHunk,
         rules_text: str,
-        context: list[CodeContext],
-        ci_issues: list[ParsedCIIssue],
+        context: List[CodeContext],
+        ci_issues: List[ParsedCIIssue],
         temperature: float = 0.3,
         max_tokens: int = 2000,
-    ) -> list[ReviewComment]:
+    ) -> List[ReviewComment]:
         """Generate review comments for a diff hunk."""
         pass
     
@@ -86,8 +86,8 @@ class LLMProvider(ABC):
     async def parse_ci_output(
         self,
         ci_result: CIToolResult,
-        changed_files: set[str],
-    ) -> list[ParsedCIIssue]:
+        changed_files: Set[str],
+    ) -> List[ParsedCIIssue]:
         """Parse CI tool output and extract relevant issues."""
         pass
     
@@ -108,7 +108,7 @@ class EmbeddingStore(ABC):
     @abstractmethod
     async def index_documents(
         self,
-        documents: list[ArchitecturalDocument],
+        documents: List[ArchitecturalDocument],
     ) -> None:
         """Index documents for RAG retrieval."""
         pass
@@ -118,8 +118,8 @@ class EmbeddingStore(ABC):
         self,
         query: str,
         top_k: int = 5,
-        filters: Optional[dict[str, str]] = None,
-    ) -> list[CodeContext]:
+        filters: Optional[Dict[str, str]] = None,
+    ) -> List[CodeContext]:
         """Search for similar code contexts."""
         pass
     
@@ -140,7 +140,7 @@ class StaticAnalyzer(ABC):
         self,
         repo: str,
         pr_number: int,
-    ) -> list[CIToolResult]:
+    ) -> List[CIToolResult]:
         """Fetch CI results for a PR."""
         pass
     
@@ -149,7 +149,7 @@ class StaticAnalyzer(ABC):
         self,
         repo: str,
         commit_sha: str,
-    ) -> list[CIToolResult]:
+    ) -> List[CIToolResult]:
         """Get check runs for a specific commit."""
         pass
 
@@ -167,7 +167,7 @@ class ConfigRepository(ABC):
         self,
         config: "ProjectConfig",
         file_path: str,
-    ) -> tuple[str, Optional[RAGConfig]]:
+    ) -> Tuple[str, Optional[RAGConfig]]:
         """Get applicable rules and RAG config for a file.
         
         Returns:
