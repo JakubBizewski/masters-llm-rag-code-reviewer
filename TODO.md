@@ -59,6 +59,86 @@ Lista zadań do ukończenia, aby system był w 100% gotowy do produkcji.
   - ✅ `go_strategy.py` - strategia dla Go
   - ✅ Language registry (OCP - Open/Closed Principle)
 
+### Impact Analysis (Call Tree / Import Tree)
+
+**Cel:** Wykrywanie potencjalnych skutków ubocznych zmian przez analizę zależności (1 poziom głębi).
+
+**Flow:**
+1. Wykryto zmianę metody/funkcji/klasy (z AST)
+2. Za pomocą call tree/import tree szukamy kodu który może być dotknięty zmianą
+3. LLM analizuje czy zmiana może mieć złe skutki (breaking changes)
+4. Jeśli tak, dodajemy komentarz z ostrzeżeniem
+
+- [ ] **Dependency Analyzer Interface** - `domain/interfaces/dependency_analyzer.py`
+  - Port `DependencyAnalyzer` (abstrakcja)
+  - `find_callers()` - kto wywołuje daną funkcję (1 poziom)
+  - `find_importers()` - kto importuje dany moduł
+  - `analyze_impact()` - analiza wpływu zmiany (z LLM)
+  - Value objects: `CallSite`, `ImportSite`, `ImpactAnalysisResult`
+
+- [ ] **Tree-sitter Dependency Adapter** - `infrastructure/ast/tree_sitter_dependency_analyzer.py`
+  - Implementacja `DependencyAnalyzer` używając tree-sitter + grep
+  - Grep search dla szybkiego znalezienia candidates
+  - Tree-sitter validation (filter false positives)
+  - Context extraction (5 linii wokół call site)
+  - LLM prompt building dla impact analysis
+
+- [ ] **Integration z ReviewOrchestrator**
+  - Extend `conduct_review()` o impact analysis flow
+  - Step 4b: Extract changed functions → find callers
+  - Step 4c: LLM analyzes impact (breaking changes?)
+  - Step 4d: Create warning comments jeśli wykryto problemy
+  - CommentSource.IMPACT_ANALYSIS
+
+- [ ] **Konfiguracja Impact Analysis**
+  - Dodaj `impact_analysis` sekcję do `.acr-config.yml`
+  - `enabled: true/false`
+  - `max_callers_per_function: 10` (limit dla performance)
+  - `depth: 1` (tylko direct callers, nie recursive)
+  - `analyze_imports: true/false`
+  - `severity_threshold: medium` (publikuj tylko >= medium)
+  - `exclude_patterns: ["tests/**"]` (nie analizuj test files)
+
+- [ ] **Testy Impact Analysis**
+  - Unit tests: `test_dependency_analyzer.py`
+    * Test find_callers() dla różnych języków
+    * Test find_importers() z różnymi import styles
+    * Test false positive filtering
+    * Mock grep + tree-sitter
+  - Integration tests: `test_impact_analysis_integration.py`
+    * Test z rzeczywistym repo (breaking change detection)
+    * Test LLM prompt generation
+    * Test warning comment formatting
+  - Performance tests: benchmark dla dużych repo
+
+- [ ] **Dokumentacja Impact Analysis**
+  - Update `acr_system/ast/README.md` z przykładami
+  - Add flow diagram (changed function → find callers → LLM analysis → warning)
+  - Example breaking change scenarios
+  - Configuration guide
+
+**Literatura:**
+- Ren2025HydraReviewer (call graph analysis)
+- Meng2025RARe (context expansion przez dependency tracking)
+- Pornprasit2024FineTuningPromptingCR (function isolation)
+
+**Korzyści:**
+- 🎯 Wykrycie breaking changes przed merge
+- 🎯 Reduced regression (mniej bugów po deploy)
+- 🎯 Cross-file awareness (nie tylko diff)
+- 🎯 Proactive review z konkretymi fix suggestions
+
+**Trade-offs:**
+- ⚠️ Performance overhead (grep + AST parsing)
+- ⚠️ Dodatkowe wywołania LLM (koszt)
+- ⚠️ False positives (funkcje o tej samej nazwie)
+
+**Mitigation:**
+- Limit do top-5 most changed functions
+- Cache callers (TTL 1h)
+- Tylko depth=1 (nie recursive)
+- Configurable: enable/disable per-project
+
 ### Security
 
 - [ ] **Webhook Signature Verification**
@@ -163,10 +243,11 @@ Lista zadań do ukończenia, aby system był w 100% gotowy do produkcji.
 
 ### Features
 
-- [ ] **Multi-file Context**
-  - Analiza zmian w kontekście wielu plików
-  - Wykrywanie breaking changes w API
-  - Cross-file dependency analysis
+- [ ] **Multi-file Context** (partially covered by Impact Analysis)
+  - ~~Wykrywanie breaking changes w API~~ (✅ covered by Impact Analysis)
+  - ~~Cross-file dependency analysis~~ (✅ covered by Impact Analysis)
+  - Analiza zmian w kontekście wielu plików (advanced)
+  - Cross-module impact analysis (beyond 1 level depth)
 
 - [ ] **Learning from Feedback**
   - Zapisywanie feedbacku o komentarzach (przydatne/nieprzydatne)
@@ -286,8 +367,9 @@ Kryteria uznania systemu za gotowy do produkcji:
 - Monitoring i metrics
 
 ### Faza 3: Advanced Features - 6 tygodni
-- AST parsing z tree-sitter
-- Advanced RAG
+- ~~AST parsing z tree-sitter~~ ✅ (DONE)
+- **Impact Analysis (Call Tree / Import Tree)** - wykrywanie breaking changes
+- Advanced RAG (hybrid search, re-ranking)
 - Multi-file context
 - Learning from feedback
 - Performance optimizations
@@ -302,10 +384,12 @@ Kryteria uznania systemu za gotowy do produkcji:
 ## 📝 Notatki
 
 ### Priorytety na teraz:
-1. **YAMLConfigLoader** - bez tego system nie może załadować konfiguracji
-2. **Webhook security** - przed uruchomieniem w produkcji
-3. **Tests** - pewność że core functionality działa
-4. **CI/CD** - automatyzacja testowania i deployment
+1. **YAMLConfigLoader** - ✅ Done (caching optional dla MVP)
+2. **AST Parsing** - ✅ Done (tree-sitter + 4 languages)
+3. **Impact Analysis** - 🔄 Next: wykrywanie breaking changes przez call tree
+4. **Webhook security** - przed uruchomieniem w produkcji
+5. **Tests** - dokończenie integration tests
+6. **CI/CD** - automatyzacja testowania i deployment
 
 ### Decyzje do podjęcia:
 - [ ] Czy używamy bazy danych czy tylko in-memory store?
@@ -323,6 +407,6 @@ Kryteria uznania systemu za gotowy do produkcji:
 
 ---
 
-**Ostatnia aktualizacja**: 2026-02-23
-**Status**: 🟡 MVP w trakcie implementacji
-**Następny milestone**: Faza 1 completion
+**Ostatnia aktualizacja**: 2026-02-26
+**Status**: 🟡 MVP w trakcie implementacji, AST Parsing ✅, Impact Analysis 🔄 Next
+**Następny milestone**: Impact Analysis + Faza 1 completion
