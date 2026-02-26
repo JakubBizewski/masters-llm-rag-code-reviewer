@@ -34,3 +34,15 @@ class CIFetchError(InfrastructureException):
 class ASTParseError(InfrastructureException):
     """Error parsing code with AST parser."""
     pass
+
+
+class AnalysisError(InfrastructureException):
+    """Error during code analysis (dependency analysis, impact analysis).
+    
+    Raised when:
+    - Grep search fails
+    - Tree-sitter parsing fails
+    - LLM analysis fails
+    - Invalid analysis results
+    """
+    pass

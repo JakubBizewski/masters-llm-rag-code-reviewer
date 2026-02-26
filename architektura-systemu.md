@@ -2381,8 +2381,266 @@ class ImpactAnalysisResult:
     importers: List[ImportSite]          # Kto importuje moduł ze zmienioną funkcją
     potential_breaking_changes: List[str] # LLM analysis: co może się zepsuć
     severity: Severity                    # CRITICAL, HIGH, MEDIUM, LOW
+```
 
-class DependencyAnalyzer(ABC):
+---
+
+### Porty (Interfaces): Split SRP Compliance
+
+System używa **dwóch oddzielnych portów** dla analizy wpływu zmian:
+
+**Port 1: CallGraphAnalyzer** (Technical Analysis)
+
+```python
+# domain/interfaces/ports.py
+
+class CallGraphAnalyzer(ABC):
+    """
+    Port dla technicznej analizy zależności (call tree, import tree).
+    
+    Czysta analiza statyczna - grep + tree-sitter.
+    NIE wymaga LLM - tylko struktura kodu.
+    
+    Use cases:
+    - Znajdź kto wywołuje zmienioną funkcję
+    - Znajdź kto importuje zmieniony moduł
+    - Budowa grafów zależności dla wizualizacji
+    - Zbieranie kontekstu dla impact analysis
+    
+    Literatura: 
+    - Ren2025HydraReviewer (call graph analysis)
+    - Meng2025RARe (context expansion przez dependencies)
+    
+    Strategia: 
+    1. Grep search dla szybkiego znalezienia candidates
+    2. Tree-sitter validation (filter false positives)
+    3. Context extraction (kod wokół call/import site)
+    
+    Głębokość: Tylko 1 poziom (direct callers/importers) dla performance.
+    """
+    
+    @abstractmethod
+    async def find_callers(
+        self, 
+        function_name: str, 
+        file_path: FilePath, 
+        repository: str,
+        language: Language
+    ) -> List[CallSite]:
+        """
+        Znajduje wszystkie miejsca gdzie dana funkcja jest wywoływana (1 poziom głębi).
+        
+        Czysta analiza techniczna - bez semantycznego zrozumienia.
+        
+        Algorytm:
+        1. Grep search dla function_name w repo (szybkie)
+        2. Parse candidates z tree-sitter (validacja rzeczywistych calls)
+        3. Extract context (5 linii wokół call site)
+        4. Identyfikacja caller function name z AST
+        
+        Args:
+            function_name: Nazwa funkcji do znalezienia
+            file_path: Ścieżka do pliku gdzie funkcja jest zdefiniowana
+            repository: Repozytorium (owner/repo)
+            language: Język programowania
+        
+        Returns:
+            Lista miejsc wywołania funkcji
+            
+        Raises:
+            AnalysisError: Jeśli grep lub tree-sitter parsing fail
+        
+        Przykład:
+            Finding callers of validate_token() w auth.py:
+            
+            callers = await analyzer.find_callers(
+                function_name="validate_token",
+                file_path=FilePath("auth.py"),
+                repository="owner/repo",
+                language=Language("python")
+            )
+            
+            # Zwraca: [
+            #   CallSite(file="handlers/login.py", line=156, caller="handle_login", ...),
+            #   CallSite(file="middleware/auth.py", line=78, caller="authenticate", ...)
+            # ]
+        """
+        pass
+    
+    @abstractmethod
+    async def find_importers(
+        self, 
+        file_path: FilePath, 
+        repository: str,
+        language: Language
+    ) -> List[ImportSite]:
+        """
+        Znajduje wszystkie pliki które importują dany moduł (1 poziom głębi).
+        
+        Czysta analiza techniczna - identyfikuje import statements.
+        
+        Algorytm:
+        1. Determine module name z file_path (np. "auth.py" → "auth")
+        2. Grep search dla import patterns ("import auth", "from auth import")
+        3. Parse z tree-sitter dla extracted imported names
+        4. Extract context (3 linie wokół import)
+        
+        Args:
+            file_path: Ścieżka do pliku/modułu
+            repository: Repozytorium
+            language: Język programowania
+        
+        Returns:
+            Lista miejsc importu
+            
+        Raises:
+            AnalysisError: Jeśli grep lub tree-sitter parsing fail
+        
+        Przykład:
+            Finding importers of auth.py:
+            
+            importers = await analyzer.find_importers(
+                file_path=FilePath("auth.py"),
+                repository="owner/repo",
+                language=Language("python")
+            )
+            
+            # Zwraca: [
+            #   ImportSite(file="handlers/login.py", line=5, 
+            #              imported_names=("validate_token", "refresh_token"), ...),
+            #   ImportSite(file="tests/test_auth.py", line=3, ...)
+            # ]
+        """
+        pass
+```
+
+**Korzyści CallGraphAnalyzer:**
+- ✅ **Single Responsibility** - tylko technical discovery
+- ✅ **Reusable** - może być używany bez Impact Analysis (np. visualizations)
+- ✅ **No LLM dependency** - czysty grep + tree-sitter
+- ✅ **Fast** - optymalizowany dla performance
+- ✅ **Testable** - łatwe mockowanie, deterministyczne wyniki
+
+---
+
+**Port 2: ImpactAnalyzer** (Semantic Analysis)
+
+```python
+# domain/interfaces/ports.py
+
+class ImpactAnalyzer(ABC):
+    """
+    Port dla semantycznej analizy wpływu zmian z użyciem LLM.
+    
+    Analizuje czy zmiany w funkcji mogą zepsuć calling code.
+    Wymaga LLMProvider dla semantycznego zrozumienia.
+    
+    Oddzielny od CallGraphAnalyzer (SRP):
+    - CallGraphAnalyzer: technical discovery (grep + tree-sitter)
+    - ImpactAnalyzer: semantic analysis (LLM understanding)
+    
+    Literatura:
+    - Pornprasit2024FineTuningPromptingCR: Function isolation dla context enhancement
+    - Ren2025HydraReviewer: Breaking change detection przez call graph
+    
+    Use cases:
+    - Wykrycie breaking changes (signature, semantics, contracts)
+    - Generowanie fix suggestions dla affected callers
+    - Ocena severity zmian (critical, high, medium, low)
+    - Human-readable explanations
+    """
+    
+    @abstractmethod
+    async def analyze_impact(
+        self,
+        changed_function: FunctionNode,
+        diff_hunk: DiffHunk,
+        callers: List[CallSite],  # Z CallGraphAnalyzer
+        repository: str,
+    ) -> ImpactAnalysisResult:
+        """
+        Analizuje wpływ zmiany funkcji używając LLM.
+        
+        LLM otrzymuje:
+        - Changed function body (before/after z diffa)
+        - Diff pokazujący co się zmieniło
+        - Lista callers z code context (z CallGraphAnalyzer)
+        
+        LLM analizuje:
+        - Signature changes (parametry dodane/usunięte/zmienione, return type)
+        - Semantic changes (logika altered, edge cases handled differently)
+        - Contract changes (preconditions, postconditions, invariants violated)
+        - Side effects (nowe exceptions thrown, nowe dependencies)
+        
+        Dla każdego callera, LLM określa:
+        - Czy jest affected? (yes/no)
+        - Dlaczego? (explanation of the issue)
+        - Co może się zepsuć? (specific failure scenario)
+        - Jak to naprawić? (code suggestion dla callera)
+        
+        Args:
+            changed_function: Funkcja która została zmodyfikowana (z AST)
+            diff_hunk: Diff pokazujący zmiany
+            callers: Lista miejsc gdzie funkcja jest wywołana (z CallGraphAnalyzer)
+            repository: Repozytorium
+        
+        Returns:
+            Impact analysis result with:
+            - Lista wykrytych breaking changes
+            - Severity assessment (critical/high/medium/low)
+            - Fix suggestions dla każdego affected callera
+            - Ogólne summary
+            
+        Raises:
+            AnalysisError: Jeśli LLM call fail lub response invalid JSON
+        
+        Przykład:
+            Analyzing impact of validate_token() signature change:
+            
+            # Get callers pierwszy (z CallGraphAnalyzer)
+            callers = await call_graph_analyzer.find_callers(...)
+            
+            # Analyze impact z LLM
+            impact = await impact_analyzer.analyze_impact(
+                changed_function=FunctionNode(name="validate_token", ...),
+                diff_hunk=DiffHunk(...),
+                callers=callers,
+                repository="owner/repo"
+            )
+            
+            # Zwraca: ImpactAnalysisResult(
+            #   breaking_changes=[
+            #     BreakingChange(
+            #       caller_file="handlers/login.py",
+            #       caller_function="handle_login",
+            #       issue="Signature changed - usunięto user_id parameter",
+            #       suggested_fix="result = validate_token(request.token)",
+            #       severity=Severity.ERROR
+            #     )
+            #   ],
+            #   summary="Critical breaking changes detected. 2 callers affected."
+            # )
+        """
+        pass
+```
+
+**Korzyści ImpactAnalyzer:**
+- ✅ **Single Responsibility** - tylko semantic analysis
+- ✅ **Explicit LLM dependency** - wyraźnie widać wymagania
+- ✅ **Focused** - nie mieszane z technical discovery
+- ✅ **Swappable** - różne LLM providers (GPT-4, Claude, local)
+- ✅ **Testable** - mockowanie LLM, deterministyczne fixtures
+
+---
+
+#### Adapter 1: TreeSitterCallGraphAnalyzer
+
+Implementacja CallGraphAnalyzer using tree-sitter + grep:
+
+```python
+# infrastructure/analysis/tree_sitter_call_graph_analyzer.py
+
+class TreeSitterCallGraphAnalyzer(CallGraphAnalyzer):
     """
     Port dla analizy zależności w kodzie (call tree, import tree).
     
@@ -2461,22 +2719,25 @@ class DependencyAnalyzer(ABC):
         pass
 ```
 
-#### Adapter: TreeSitterDependencyAnalyzer
+#### Adapter 1: TreeSitterCallGraphAnalyzer
 
-Implementacja using tree-sitter + grep search:
+Implementacja CallGraphAnalyzer using tree-sitter + grep:
 
 ```python
-# infrastructure/ast/tree_sitter_dependency_analyzer.py
+# infrastructure/analysis/tree_sitter_call_graph_analyzer.py
 
-class TreeSitterDependencyAnalyzer(DependencyAnalyzer):
+class TreeSitterCallGraphAnalyzer(CallGraphAnalyzer):
     """
-    Implementacja DependencyAnalyzer używając tree-sitter + grep.
+    Implementacja CallGraphAnalyzer - technical discovery usando tree-sitter + grep.
     
-    Strategia:
-    1. Tree-sitter parsuje kod i buduje AST
-    2. Query dla call_expression, import_statement
-    3. Grep search dla szybkiego znalezienia candidates (optimization)
-    4. Tree-sitter validacja candidates (false positive filter)
+    Czysta analiza statyczna - NIE używa LLM.
+    
+    Strategia (dla performance):
+    1. Grep search dla fast candidate discovery (millions of lines → seconds)
+    2. Tree-sitter validation dla filter false positives (parsing only matches)
+    3. Context extraction (kod wokół call/import site)
+    
+    Literatura: Ren2025HydraReviewer (call graph analysis), Meng2025RARe (context expansion)
     """
     
     def __init__(
@@ -2489,7 +2750,7 @@ class TreeSitterDependencyAnalyzer(DependencyAnalyzer):
         self.ast_parser = ast_parser
         self.language_registry = language_registry
     
-    def find_callers(
+    async def find_callers(
         self, 
         function_name: str, 
         file_path: FilePath, 
@@ -2497,36 +2758,44 @@ class TreeSitterDependencyAnalyzer(DependencyAnalyzer):
         language: Language
     ) -> List[CallSite]:
         """
-        Znajduje wywołania funkcji w repozytorium.
+        Znajduje wywołania funkcji w repozytorium (1 poziom głębi).
         
         Algorytm:
-        1. Grep search dla function_name w repo (szybkie znalezienie candidates)
-        2. Dla każdego candidate: parse z tree-sitter
-        3. Verify że to rzeczywiście call_expression (nie np. definicja)
-        4. Extract context (5 linii wokół wywołania)
+        1. Grep search dla function_name w repo (fast - milisekundy)
+        2. Dla każdego candidate: parse z tree-sitter (tylko matched files)
+        3. Verify że to call_expression (not definition/comment/string)
+        4. Extract context (5 linii wokół wywołania) + caller function name
         """
         callers = []
         
         # Step 1: Grep search (fast)
-        grep_results = self._grep_function_usage(repository, function_name, language)
+        grep_results = await self._grep_function_usage(repository, function_name, language)
         
+        # Step 2-4: Validate z tree-sitter (only matched files)
         for file_path_candidate, line_num, line_content in grep_results:
-            # Step 2: Parse file with tree-sitter (validate)
             try:
-                file_content = self.vcs.fetch_file(repository, file_path_candidate, "HEAD")
-                is_call = self._verify_is_call_site(
+                file_content = await self.vcs.fetch_file(
+                    repository, file_path_candidate, "HEAD"
+                )
+                
+                # Verify: Is it a call site? (not definition/comment)
+                is_call = await self._verify_is_call_site(
                     file_content, line_num, function_name, language
                 )
                 
                 if is_call:
-                    # Step 3: Extract context
+                    # Extract context (5 lines around call)
                     context = self._extract_context(file_content, line_num, window=5)
-                    caller_name = self._extract_caller_name(file_content, line_num, language)
+                    
+                    # Extract caller function name z AST
+                    caller_name = await self._extract_caller_name(
+                        file_content, line_num, language
+                    )
                     
                     callers.append(CallSite(
                         file_path=file_path_candidate,
                         line_number=line_num,
-                        caller_name=caller_name or "unknown",
+                        caller_name=caller_name or "module_scope",
                         callee_name=function_name,
                         context=context
                     ))
@@ -2716,11 +2985,15 @@ class ReviewOrchestrator:
         config_loader: ConfigRepository,
         static_analyzer: Optional[StaticAnalyzer] = None,
         ast_parser: Optional[ASTParser] = None,
-        dependency_analyzer: Optional[DependencyAnalyzer] = None  # ← Nowy
+        call_graph_analyzer: Optional[CallGraphAnalyzer] = None,  # ← Nowy (technical)
+        impact_analyzer: Optional[ImpactAnalyzer] = None          # ← Nowy (semantic)
     ):
-        # ... existing fields ...
-        self.dependency_analyzer = dependency_analyzer
-        self.enable_impact_analysis = dependency_analyzer is not None
+        # ...existing fields ...
+        self.call_graph_analyzer = call_graph_analyzer
+        self.impact_analyzer = impact_analyzer
+        self.enable_impact_analysis = (
+            call_graph_analyzer is not None and impact_analyzer is not None
+        )
     
     async def conduct_review(self, pr: PullRequest, config: ProjectConfig) -> ReviewResult:
         """
@@ -2753,8 +3026,8 @@ class ReviewOrchestrator:
             
             for func in changed_functions:
                 try:
-                    # Step 4b: Find callers (1 level deep)
-                    callers = self.dependency_analyzer.find_callers(
+                    # Step 5b: Find callers (CallGraphAnalyzer - technical, 1 level deep)
+                    callers = await self.call_graph_analyzer.find_callers(
                         function_name=func.name,
                         file_path=func.file_path,
                         repository=pr.repository,
@@ -2767,19 +3040,18 @@ class ReviewOrchestrator:
                     
                     logger.info(f"Found {len(callers)} callers for {func.name}")
                     
-                    # Step 4c: LLM analyzes impact
+                    # Step 5c: ImpactAnalyzer - semantic LLM analysis
                     diff_hunk = self._find_diff_for_function(pr.diff_hunks, func)
-                    impact_result = self.dependency_analyzer.analyze_impact(
+                    impact_result = await self.impact_analyzer.analyze_impact(
                         changed_function=func,
                         diff_hunk=diff_hunk,
                         callers=callers,
-                        repository=pr.repository,
-                        llm=self.llm
+                        repository=pr.repository
                     )
                     
-                    # Step 4d: Create warning comments if breaking changes detected
-                    if impact_result.potential_breaking_changes:
-                        for breaking_change in impact_result.potential_breaking_changes:
+                    # Step 5d: Create warning comments if breaking changes detected
+                    if impact_result.breaking_changes:
+                        for breaking_change in impact_result.breaking_changes:
                             impact_comments.append(ReviewComment(
                                 file_path=func.file_path,
                                 line_number=func.start_line,
@@ -2813,26 +3085,26 @@ class ReviewOrchestrator:
     def _format_impact_warning(
         self, 
         function_name: str, 
-        breaking_change: dict,
+        breaking_change: BreakingChange,
         severity: Severity
     ) -> str:
         """Formatuje komentarz ostrzeżenia o impact."""
-        emoji = "🔴" if severity == Severity.CRITICAL else "⚠️"
+        emoji = "🔴" if severity == Severity.ERROR else "⚠️"
         
         return f"""{emoji} **IMPACT WARNING** - Breaking Change Detected
 
 Function `{function_name}` is called in other places. This change may break:
 
-**Affected:** `{breaking_change['caller_function']}` in [{breaking_change['caller_file']}]
+**Affected:** `{breaking_change.caller_function}` in [{breaking_change.caller_file}]
 
-**Issue:** {breaking_change['issue']}
+**Issue:** {breaking_change.issue}
 
 **Suggested fix for caller:**
 ```python
-{breaking_change['suggested_fix']}
+{breaking_change.suggested_fix}
 ```
 
-**Severity:** {severity.value.upper()}
+**Severity:** {breaking_change.severity.value.upper()}
 
 Please verify that all calling code is updated accordingly, or add tests to catch potential breakage.
 """
@@ -2863,14 +3135,15 @@ Please verify that all calling code is updated accordingly, or add tests to catc
    a. AST Parser: extract_changed_functions()
       → [FunctionNode(name="validate_token", file="auth.py", lines=42-50)]
    
-   b. DependencyAnalyzer.find_callers("validate_token", "auth.py")
-      - Grep search: "validate_token" in repository
+   b. CallGraphAnalyzer.find_callers("validate_token", "auth.py")  # Technical discovery
+      - Grep search: "validate_token" in repository (fast candidate discovery)
+      - Tree-sitter validation (filter false positives)
       - Found 3 callers:
         * handlers/login.py:156 (in `handle_login()`)
         * middleware/auth_middleware.py:78 (in `authenticate()`)
         * tests/test_auth.py:234 (in `test_invalid_token()`)
    
-   c. DependencyAnalyzer.analyze_impact():
+   c. ImpactAnalyzer.analyze_impact():  # Semantic LLM analysis
       LLM receives:
       ```
       ## Changed Function: validate_token
@@ -3743,9 +4016,10 @@ def bootstrap_container(config_path: str = ".acr-config.yml") -> Container:
       - extract_changed_functions(diff, full_code, Language.PYTHON)
       - Result: [FunctionNode(name="validate_token", file="auth.py", lines=42-50)]
    ↓
-   f. **Impact Analysis** (TreeSitterDependencyAnalyzer):
-      1. find_callers("validate_token", "auth.py")
-         - Grep search: "validate_token" across repository
+   f. **Impact Analysis** (Split: CallGraphAnalyzer + ImpactAnalyzer):
+      
+      f1. **CallGraphAnalyzer.find_callers()** (Technical Discovery - NO LLM):
+         - Grep search: "validate_token" across repository (fast)
          - Found candidates:
            * handlers/login.py:156
            * middleware/auth_middleware.py:78
@@ -3762,7 +4036,7 @@ def bootstrap_container(config_path: str = ".acr-config.yml") -> Container:
                       caller="test_invalid_token",
                       context="assert not validate_token(bad_token, user.id)")
       ↓
-      2. analyze_impact(changed_function, diff, callers, llm)
+      f2. **ImpactAnalyzer.analyze_impact()** (Semantic LLM Analysis):
          - LLM prompt:
            ```
            ## Changed Function: validate_token
@@ -3803,7 +4077,7 @@ def bootstrap_container(config_path: str = ".acr-config.yml") -> Container:
            }
            ```
       ↓
-      3. Create Impact Warning Comments:
+      f3. Create Impact Warning Comments:
          - Comment 1 (auth.py:42):
            🔴 **IMPACT WARNING** - Breaking Change Detected
            

@@ -1,7 +1,7 @@
 """Domain entities for the ACR system."""
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID, uuid4
 
 from acr_system.domain.value_objects.value_objects import FilePath, Language, Severity
@@ -209,3 +209,40 @@ class PullRequest:
     def get_hunks_for_file(self, file_path: str) -> list[DiffHunk]:
         """Get all hunks for a specific file."""
         return [hunk for hunk in self.diff_hunks if hunk.file_path.value == file_path]
+
+
+@dataclass
+class FunctionNode:
+    """Function extracted from AST (Tree-sitter).
+    
+    Represents a function/method with its metadata and body.
+    Used for context enhancement in RAG and impact analysis.
+    """
+    
+    name: str
+    file_path: FilePath
+    start_line: int
+    end_line: int
+    body: str  # Full function body code
+    language: Language
+    signature: Optional[str] = None  # Function signature (with params, return type)
+    docstring: Optional[str] = None
+    
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("Function name cannot be empty")
+        if self.start_line < 1:
+            raise ValueError("start_line must be positive")
+        if self.end_line < self.start_line:
+            raise ValueError("end_line must be >= start_line")
+        if not self.body:
+            raise ValueError("Function body cannot be empty")
+    
+    @property
+    def line_count(self) -> int:
+        """Number of lines in the function."""
+        return self.end_line - self.start_line + 1
+    
+    def contains_line(self, line_number: int) -> bool:
+        """Check if a line number is within this function."""
+        return self.start_line <= line_number <= self.end_line

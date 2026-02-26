@@ -69,26 +69,47 @@ Lista zadań do ukończenia, aby system był w 100% gotowy do produkcji.
 3. LLM analizuje czy zmiana może mieć złe skutki (breaking changes)
 4. Jeśli tak, dodajemy komentarz z ostrzeżeniem
 
-- [ ] **Dependency Analyzer Interface** - `domain/interfaces/dependency_analyzer.py`
-  - Port `DependencyAnalyzer` (abstrakcja)
-  - `find_callers()` - kto wywołuje daną funkcję (1 poziom)
-  - `find_importers()` - kto importuje dany moduł
-  - `analyze_impact()` - analiza wpływu zmiany (z LLM)
-  - Value objects: `CallSite`, `ImportSite`, `ImpactAnalysisResult`
+- [x] **Dependency Analyzer Interface** - `domain/interfaces/ports.py`
+  - ✅ **Refactored to 2 separate ports (SRP compliance):**
+  
+  **1. CallGraphAnalyzer Port** (technical - grep + tree-sitter):
+  - ✅ `find_callers()` - kto wywołuje daną funkcję (1 poziom)
+  - ✅ `find_importers()` - kto importuje dany moduł
+  - ✅ Pure static analysis - NO LLM required
+  - ✅ Reusable for visualization, metrics, etc.
+  
+  **2. ImpactAnalyzer Port** (semantic - LLM analysis):
+  - ✅ `analyze_impact()` - analiza wpływu zmiany (z LLM)
+  - ✅ Semantic understanding of breaking changes
+  - ✅ Explicit LLM dependency
+  - ✅ Generates fix suggestions
+  
+  - ✅ Value objects: `CallSite`, `ImportSite`, `ImpactAnalysisResult`, `BreakingChange`
+  - ✅ Entity: `FunctionNode` (dodano do entities.py)
+  - ✅ Exception: `AnalysisError` (dodano do infrastructure_exceptions.py)
+  - ✅ Tests: Unit tests dla value objects (test_value_objects.py)
 
-- [ ] **Tree-sitter Dependency Adapter** - `infrastructure/ast/tree_sitter_dependency_analyzer.py`
-  - Implementacja `DependencyAnalyzer` używając tree-sitter + grep
+- [ ] **Call Graph Analyzer Adapter** - `infrastructure/analysis/call_graph_analyzer.py`
+  - Implementacja `CallGraphAnalyzer` używając tree-sitter + grep
   - Grep search dla szybkiego znalezienia candidates
   - Tree-sitter validation (filter false positives)
   - Context extraction (5 linii wokół call site)
+  - NO LLM dependency - pure technical analysis
+
+- [ ] **Impact Analyzer Adapter** - `infrastructure/analysis/impact_analyzer.py`
+  - Implementacja `ImpactAnalyzer` używając LLM
+  - Requires `LLMProvider` dependency (injected)
   - LLM prompt building dla impact analysis
+  - Parse LLM response (JSON) → ImpactAnalysisResult
+  - Breaking change detection + fix suggestions
 
 - [ ] **Integration z ReviewOrchestrator**
   - Extend `conduct_review()` o impact analysis flow
-  - Step 4b: Extract changed functions → find callers
-  - Step 4c: LLM analyzes impact (breaking changes?)
+  - Step 4b: Extract changed functions → **CallGraphAnalyzer**.find_callers()
+  - Step 4c: **ImpactAnalyzer**.analyze_impact() (breaking changes?)
   - Step 4d: Create warning comments jeśli wykryto problemy
   - CommentSource.IMPACT_ANALYSIS
+  - Inject both: `CallGraphAnalyzer` + `ImpactAnalyzer` (2 dependencies)
 
 - [ ] **Konfiguracja Impact Analysis**
   - Dodaj `impact_analysis` sekcję do `.acr-config.yml`
