@@ -1,9 +1,10 @@
 """Project configuration model."""
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from acr_system.domain.value_objects.value_objects import (
     FilePatternRule,
+    ImpactAnalysisConfig,
     LLMConfig,
     RAGConfig,
     RuleSet,
@@ -15,12 +16,13 @@ class ProjectConfig:
     """Project configuration loaded from .acr-config.yml"""
     
     review_enabled: bool = True
-    global_rules: list[RuleSet] = field(default_factory=list)
-    file_patterns: list[FilePatternRule] = field(default_factory=list)
+    global_rules: List[RuleSet] = field(default_factory=list)
+    file_patterns: List[FilePatternRule] = field(default_factory=list)
     llm_config: LLMConfig = field(default_factory=LLMConfig)
     rag_config: RAGConfig = field(default_factory=RAGConfig)
+    impact_analysis_config: ImpactAnalysisConfig = field(default_factory=ImpactAnalysisConfig)
     
-    def get_rules_for_file(self, file_path: str) -> tuple[str, Optional[RAGConfig]]:
+    def get_rules_for_file(self, file_path: str) -> Tuple[str, Optional[RAGConfig]]:
         """Get applicable rules and RAG config for a file.
         
         Returns:

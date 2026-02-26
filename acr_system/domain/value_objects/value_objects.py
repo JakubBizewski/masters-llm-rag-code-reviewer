@@ -181,6 +181,30 @@ class RAGConfig:
             raise ValueError("top_k must be positive")
 
 
+@dataclass(frozen=True)
+class ImpactAnalysisConfig:
+    """Impact Analysis configuration for detecting breaking changes.
+    
+    Controls how the system analyzes the impact of code changes through
+    call graph analysis and semantic understanding via LLM.
+    """
+    
+    enabled: bool = True
+    max_callers_per_function: int = 10  # Limit for performance
+    depth: int = 1  # Only direct callers (not recursive)
+    analyze_imports: bool = True  # Also analyze import dependencies
+    severity_threshold: str = "medium"  # Publish only >= medium
+    exclude_patterns: Tuple[str, ...] = ()  # Don't analyze these patterns
+    
+    def __post_init__(self) -> None:
+        if self.max_callers_per_function < 1:
+            raise ValueError("max_callers_per_function must be positive")
+        if self.depth < 1:
+            raise ValueError("depth must be positive")
+        if self.severity_threshold not in {"low", "medium", "high", "critical"}:
+            raise ValueError(f"Invalid severity_threshold: {self.severity_threshold}")
+
+
 # ============================================================
 # Impact Analysis Value Objects
 # ============================================================

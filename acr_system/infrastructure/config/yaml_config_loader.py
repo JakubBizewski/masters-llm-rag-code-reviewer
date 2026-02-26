@@ -1,11 +1,12 @@
 """YAML configuration loader."""
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import yaml
 
 from acr_system.domain.interfaces.ports import ConfigRepository, VCSRepository
 from acr_system.domain.value_objects.value_objects import (
     FilePatternRule,
+    ImpactAnalysisConfig,
     LLMConfig,
     RAGConfig,
     RuleSet,
@@ -53,7 +54,7 @@ class YAMLConfigLoader(ConfigRepository):
             # Return default config if file not found
             return ProjectConfig()
     
-    def _parse_config(self, data: dict[str, Any]) -> ProjectConfig:
+    def _parse_config(self, data: Dict[str, Any]) -> ProjectConfig:
         """Parse configuration data into ProjectConfig."""
         try:
             # Parse review settings
@@ -122,12 +123,24 @@ class YAMLConfigLoader(ConfigRepository):
                 architectural_docs=rag_data.get("architectural_docs", []),
             )
             
+            # Parse impact analysis config
+            impact_data = data.get("impact_analysis", {})
+            impact_analysis_config = ImpactAnalysisConfig(
+                enabled=impact_data.get("enabled", True),
+                max_callers_per_function=impact_data.get("max_callers_per_function", 10),
+                depth=impact_data.get("depth", 1),
+                analyze_imports=impact_data.get("analyze_imports", True),
+                severity_threshold=impact_data.get("severity_threshold", "medium"),
+                exclude_patterns=tuple(impact_data.get("exclude_patterns", [])),
+            )
+            
             return ProjectConfig(
                 review_enabled=review_enabled,
                 global_rules=global_rules,
                 file_patterns=file_patterns,
                 llm_config=llm_config,
                 rag_config=rag_config,
+                impact_analysis_config=impact_analysis_config,
             )
             
         except Exception as e:
@@ -137,6 +150,6 @@ class YAMLConfigLoader(ConfigRepository):
         self,
         config: ProjectConfig,
         file_path: str,
-    ) -> tuple[str, Optional[RAGConfig]]:
+    ) -> Tuple[str, Optional[RAGConfig]]:
         """Get applicable rules and RAG config for a file."""
         return config.get_rules_for_file(file_path)

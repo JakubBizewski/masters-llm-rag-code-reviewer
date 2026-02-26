@@ -130,3 +130,16 @@ rag:
     - "ARCHITECTURE.md"
     - "docs/architecture/"
     - "docs/adr/*.md"  # Architecture Decision Records
+
+# Impact Analysis configuration (Breaking Changes Detection)
+impact_analysis:
+  enabled: true
+  max_callers_per_function: 10  # Limit callers analyzed per function (performance)
+  depth: 1  # Only analyze direct callers (not recursive call chains)
+  analyze_imports: true  # Also analyze import dependencies
+  severity_threshold: "medium"  # Only create comments for >= medium severity
+  exclude_patterns:
+    - "tests/**"  # Don't analyze test files
+    - "**/*.test.py"
+    - "**/*.test.js"
+    - "**/migrations/**"  # Skip database migrations

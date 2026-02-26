@@ -111,14 +111,14 @@ Lista zadań do ukończenia, aby system był w 100% gotowy do produkcji.
   - ✅ CommentSource.IMPACT_ANALYSIS
   - ✅ Injected both: `CallGraphAnalyzer` + `ImpactAnalyzer` (2 dependencies)
 
-- [ ] **Konfiguracja Impact Analysis**
-  - Dodaj `impact_analysis` sekcję do `.acr-config.yml`
-  - `enabled: true/false`
-  - `max_callers_per_function: 10` (limit dla performance)
-  - `depth: 1` (tylko direct callers, nie recursive)
-  - `analyze_imports: true/false`
-  - `severity_threshold: medium` (publikuj tylko >= medium)
-  - `exclude_patterns: ["tests/**"]` (nie analizuj test files)
+- [x] **Konfiguracja Impact Analysis**
+  - ✅ Dodano `impact_analysis` sekcję do `.acr-config.yml`
+  - ✅ `enabled: true/false`
+  - ✅ `max_callers_per_function: 10` (limit dla performance)
+  - ✅ `depth: 1` (tylko direct callers, nie recursive)
+  - ✅ `analyze_imports: true/false`
+  - ✅ `severity_threshold: medium` (publikuj tylko >= medium)
+  - ✅ `exclude_patterns: ["tests/**"]` (nie analizuj test files)
 
 - [ ] **Testy Impact Analysis**
   - Unit tests: `test_dependency_analyzer.py`
