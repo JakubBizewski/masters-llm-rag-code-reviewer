@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, Optional, Set
 from uuid import UUID, uuid4
 
-from acr_system.domain.value_objects.value_objects import FilePath, Language, Severity
+from acr_system.domain.value_objects.value_objects import FilePath, Language, Severity, CommentSource
 
 
 @dataclass
@@ -47,6 +47,7 @@ class ReviewComment:
     line_number: Optional[int]
     severity: Severity
     message: str
+    source: CommentSource = CommentSource(source=CommentSource.LLM)
     id: UUID = field(default_factory=uuid4)
     suggestion: Optional[str] = None
     rule_name: Optional[str] = None  # Which rule triggered this comment

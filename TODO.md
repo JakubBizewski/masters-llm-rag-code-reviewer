@@ -103,13 +103,13 @@ Lista zadań do ukończenia, aby system był w 100% gotowy do produkcji.
   - ✅ Parse LLM response (JSON) → ImpactAnalysisResult
   - ✅ Breaking change detection + fix suggestions
 
-- [ ] **Integration z ReviewOrchestrator**
-  - Extend `conduct_review()` o impact analysis flow
-  - Step 4b: Extract changed functions → **CallGraphAnalyzer**.find_callers()
-  - Step 4c: **ImpactAnalyzer**.analyze_impact() (breaking changes?)
-  - Step 4d: Create warning comments jeśli wykryto problemy
-  - CommentSource.IMPACT_ANALYSIS
-  - Inject both: `CallGraphAnalyzer` + `ImpactAnalyzer` (2 dependencies)
+- [x] **Integration z ReviewOrchestrator**
+  - ✅ Extended `review_pull_request()` o impact analysis flow
+  - ✅ Step 4b: Extract changed functions → **CallGraphAnalyzer**.find_callers()
+  - ✅ Step 4c: **ImpactAnalyzer**.analyze_impact() (breaking changes?)
+  - ✅ Step 4d: Create warning comments jeśli wykryto problemy
+  - ✅ CommentSource.IMPACT_ANALYSIS
+  - ✅ Injected both: `CallGraphAnalyzer` + `ImpactAnalyzer` (2 dependencies)
 
 - [ ] **Konfiguracja Impact Analysis**
   - Dodaj `impact_analysis` sekcję do `.acr-config.yml`

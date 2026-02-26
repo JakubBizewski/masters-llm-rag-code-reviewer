@@ -1,20 +1,28 @@
 """Domain services for orchestrating code review."""
-from typing import Optional
+from typing import List, Optional
 
+from acr_system.ast.parser import ASTParser
 from acr_system.domain.entities.entities import (
     CodeContext,
     DiffHunk,
+    FunctionNode,
     ParsedCIIssue,
     PullRequest,
     ReviewComment,
 )
 from acr_system.domain.interfaces.ports import (
+    CallGraphAnalyzer,
     EmbeddingStore,
+    ImpactAnalyzer,
     LLMProvider,
     StaticAnalyzer,
     VCSRepository,
 )
-from acr_system.domain.value_objects.value_objects import RAGConfig
+from acr_system.domain.value_objects.value_objects import (
+    CommentSource,
+    RAGConfig,
+    Severity,
+)
 
 
 class ContextBuilder:
@@ -33,7 +41,7 @@ class ContextBuilder:
         diff_hunk: DiffHunk,
         pr: PullRequest,
         rag_config: Optional[RAGConfig] = None,
-    ) -> list[CodeContext]:
+    ) -> List[CodeContext]:
         """Build context for a diff hunk.
         
         Context includes:
@@ -41,7 +49,7 @@ class ContextBuilder:
         - Surrounding code context
         - Previous review history
         """
-        context: list[CodeContext] = []
+        context: List[CodeContext] = []
         
         # RAG retrieval if enabled
         if rag_config and rag_config.enabled:
@@ -113,18 +121,26 @@ class ReviewOrchestrator:
         self,
         llm_provider: LLMProvider,
         context_builder: ContextBuilder,
+        vcs_repository: VCSRepository,
+        ast_parser: ASTParser,
         static_analyzer: Optional[StaticAnalyzer] = None,
+        call_graph_analyzer: Optional[CallGraphAnalyzer] = None,
+        impact_analyzer: Optional[ImpactAnalyzer] = None,
     ):
         self.llm_provider = llm_provider
         self.context_builder = context_builder
+        self.vcs_repository = vcs_repository
+        self.ast_parser = ast_parser
         self.static_analyzer = static_analyzer
+        self.call_graph_analyzer = call_graph_analyzer
+        self.impact_analyzer = impact_analyzer
     
     async def review_pull_request(
         self,
         pr: PullRequest,
         rules_text: str,
         rag_config: Optional[RAGConfig] = None,
-    ) -> list[ReviewComment]:
+    ) -> List[ReviewComment]:
         """Review a pull request and generate comments.
         
         Args:
@@ -135,10 +151,10 @@ class ReviewOrchestrator:
         Returns:
             List of review comments
         """
-        all_comments: list[ReviewComment] = []
+        all_comments: List[ReviewComment] = []
         
         # Fetch CI results if analyzer available
-        ci_issues: list[ParsedCIIssue] = []
+        ci_issues: List[ParsedCIIssue] = []
         if self.static_analyzer:
             ci_results = await self.static_analyzer.fetch_ci_results(
                 repo=pr.repository,
@@ -179,16 +195,118 @@ class ReviewOrchestrator:
             
             all_comments.extend(comments)
         
+        # Step 4b-4d: Impact Analysis (breaking changes detection)
+        if self.call_graph_analyzer and self.impact_analyzer:
+            impact_comments = await self._perform_impact_analysis(pr)
+            all_comments.extend(impact_comments)
+        
         return all_comments
+    
+    async def _extract_changed_functions(
+        self,
+        diff_hunk: DiffHunk,
+        pr: PullRequest,
+    ) -> List[FunctionNode]:
+        """Extract functions that were changed in a diff hunk.
+        
+        Args:
+            diff_hunk: The diff hunk to analyze
+            pr: Pull request context
+            
+        Returns:
+            List of changed functions
+        """
+        try:
+            # Get the full file content after the change
+            file_content = await self.vcs_repository.get_file_content(
+                repo=pr.repository,
+                file_path=diff_hunk.file_path.value,
+                ref=pr.source_branch,
+            )
+            
+            # Extract changed functions using AST parser
+            changed_functions = self.ast_parser.extract_changed_functions(
+                diff=diff_hunk,
+                code=file_content,
+                language=diff_hunk.language,
+            )
+            
+            return changed_functions
+        except Exception:
+            # If we can't extract functions, return empty list (non-critical)
+            return []
+    
+    async def _perform_impact_analysis(self, pr: PullRequest) -> List[ReviewComment]:
+        """Perform impact analysis on changed functions to detect breaking changes.
+        
+        Args:
+            pr: Pull request to analyze
+            
+        Returns:
+            List of warning comments for potential breaking changes
+        """
+        impact_comments: List[ReviewComment] = []
+        
+        # Extract changed functions from all diff hunks
+        for hunk in pr.diff_hunks:
+            changed_functions = await self._extract_changed_functions(hunk, pr)
+            
+            # Analyze each changed function
+            for func in changed_functions:
+                try:
+                    # Step 4b: Find callers of this function
+                    callers = await self.call_graph_analyzer.find_callers(
+                        function_name=func.name,
+                        file_path=func.file_path,
+                        language=func.language,
+                        repo_path=pr.repository,
+                    )
+                    
+                    # Skip if no callers found (not used elsewhere)
+                    if not callers:
+                        continue
+                    
+                    # Step 4c: Analyze impact with LLM
+                    impact_result = await self.impact_analyzer.analyze_impact(
+                        changed_function=func,
+                        diff=hunk,
+                        callers=callers,
+                        language=func.language,
+                    )
+                    
+                    # Step 4d: Create warning comments for breaking changes
+                    if impact_result.breaking_changes:
+                        for breaking_change in impact_result.breaking_changes:
+                            # Only create comments for medium+ severity
+                            if breaking_change.severity.priority >= Severity(level=Severity.WARNING).priority:
+                                comment = ReviewComment(
+                                    file_path=func.file_path,
+                                    line_number=func.start_line,
+                                    severity=breaking_change.severity,
+                                    message=f"⚠️ Potential Breaking Change in `{func.name}()`:\n\n"
+                                            f"{breaking_change.description}\n\n"
+                                            f"**Affected callers:** {len(callers)}\n"
+                                            f"**Impact:** {impact_result.summary}",
+                                    suggestion=breaking_change.fix_suggestion,
+                                    rule_name="impact_analysis",
+                                    source=CommentSource(source=CommentSource.IMPACT_ANALYSIS),
+                                )
+                                impact_comments.append(comment)
+                
+                except Exception:
+                    # Continue with other functions if one fails
+                    continue
+        
+        return impact_comments
     
     async def review_diff_hunk(
         self,
         hunk: DiffHunk,
         pr: PullRequest,
         rules_text: str,
-        ci_issues: list[ParsedCIIssue],
+        ci_issues: List[ParsedCIIssue],
         rag_config: Optional[RAGConfig] = None,
-    ) -> list[ReviewComment]:
+    ) -> List[ReviewComment]:
         """Review a single diff hunk.
         
         This method allows more granular control over the review process.

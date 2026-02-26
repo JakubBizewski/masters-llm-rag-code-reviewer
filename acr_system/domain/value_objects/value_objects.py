@@ -95,6 +95,26 @@ class Severity:
 
 
 @dataclass(frozen=True)
+class CommentSource:
+    """Value object representing the source of a review comment."""
+    
+    LLM = "llm"
+    STATIC_ANALYSIS = "static_analysis"
+    IMPACT_ANALYSIS = "impact_analysis"
+    HUMAN = "human"
+    
+    source: str
+    
+    def __post_init__(self) -> None:
+        valid_sources = {self.LLM, self.STATIC_ANALYSIS, self.IMPACT_ANALYSIS, self.HUMAN}
+        if self.source not in valid_sources:
+            raise ValueError(f"Invalid comment source: {self.source}. Must be one of {valid_sources}")
+    
+    def __str__(self) -> str:
+        return self.source
+
+
+@dataclass(frozen=True)
 class RuleSet:
     """General set of code review rules (security, performance, quality)."""
     
