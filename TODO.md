@@ -89,12 +89,12 @@ Lista zadań do ukończenia, aby system był w 100% gotowy do produkcji.
   - ✅ Exception: `AnalysisError` (dodano do infrastructure_exceptions.py)
   - ✅ Tests: Unit tests dla value objects (test_value_objects.py)
 
-- [ ] **Call Graph Analyzer Adapter** - `infrastructure/analysis/call_graph_analyzer.py`
-  - Implementacja `CallGraphAnalyzer` używając tree-sitter + grep
-  - Grep search dla szybkiego znalezienia candidates
-  - Tree-sitter validation (filter false positives)
-  - Context extraction (5 linii wokół call site)
-  - NO LLM dependency - pure technical analysis
+- [x] **Call Graph Analyzer Adapter** - `infrastructure/analysis/tree_sitter_call_graph_analyzer.py`
+  - ✅ Implementacja `CallGraphAnalyzer` używając tree-sitter + grep
+  - ✅ Grep search dla szybkiego znalezienia candidates
+  - ✅ Tree-sitter validation (filter false positives)
+  - ✅ Context extraction (5 linii wokół call site)
+  - ✅ NO LLM dependency - pure technical analysis
 
 - [ ] **Impact Analyzer Adapter** - `infrastructure/analysis/impact_analyzer.py`
   - Implementacja `ImpactAnalyzer` używając LLM
