@@ -327,10 +327,10 @@ Determine:
             Severity object
         """
         severity_map = {
-            "critical": Severity.ERROR,
-            "high": Severity.ERROR,
-            "medium": Severity.WARNING,
-            "low": Severity.INFO
+            "critical": Severity(level=Severity.ERROR),
+            "high": Severity(level=Severity.ERROR),
+            "medium": Severity(level=Severity.WARNING),
+            "low": Severity(level=Severity.INFO)
         }
         
         severity_lower = severity_str.lower()
@@ -338,6 +338,6 @@ Determine:
             logger.warning(
                 f"Unknown severity '{severity_str}', defaulting to WARNING"
             )
-            return Severity.WARNING
+            return Severity(level=Severity.WARNING)
         
         return severity_map[severity_lower]

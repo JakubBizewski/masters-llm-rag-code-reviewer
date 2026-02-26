@@ -402,7 +402,7 @@ class TreeSitterCallGraphAnalyzer(CallGraphAnalyzer):
         try:
             strategy = LanguageRegistry.get_strategy(language)
             if not strategy:
-                logger.warning(f"No strategy for {language.value}, skipping validation")
+                logger.warning(f"No strategy for {language.name}, skipping validation")
                 return True  # Fallback: trust grep
             
             # Get tree-sitter parser from AST parser
@@ -504,11 +504,11 @@ class TreeSitterCallGraphAnalyzer(CallGraphAnalyzer):
             import_line = lines[line_number - 1].strip()
             
             # Language-specific parsing
-            if language.value == "python":
+            if language.name == "python":
                 return self._parse_python_import(import_line, module_name)
-            elif language.value in ("javascript", "typescript"):
+            elif language.name in ("javascript", "typescript"):
                 return self._parse_js_import(import_line, module_name)
-            elif language.value == "go":
+            elif language.name == "go":
                 return self._parse_go_import(import_line, module_name)
             else:
                 # Fallback: return module name
@@ -562,19 +562,23 @@ class TreeSitterCallGraphAnalyzer(CallGraphAnalyzer):
         - "index.js" → "index"
         
         Args:
-            file_path: Path to the file
+            file_path: Path to the file (string or FilePath)
             language: Programming language
             
         Returns:
             Module name
         """
-        path = Path(file_path.value)
+        # Handle both strings and FilePath objects
+        if isinstance(file_path, str):
+            path = Path(file_path)
+        else:
+            path = Path(file_path.value)
         
         # Remove extension
         module_name = path.stem
         
         # For Python, include package structure
-        if language.value == "python" and len(path.parts) > 1:
+        if language.name == "python" and len(path.parts) > 1:
             # Get all parent directories except the first (usually "src")
             parts = list(path.parts[:-1])
             if parts and parts[0] in ("src", "lib", "app"):
@@ -599,20 +603,20 @@ class TreeSitterCallGraphAnalyzer(CallGraphAnalyzer):
         Returns:
             List of grep patterns
         """
-        if language.value == "python":
+        if language.name == "python":
             return [
                 f"import {module_name}",
                 f"from {module_name} import",
                 f"from {module_name}.",
             ]
-        elif language.value in ("javascript", "typescript"):
+        elif language.name in ("javascript", "typescript"):
             return [
                 f"from '{module_name}'",
                 f'from "{module_name}"',
                 f"require('{module_name}')",
                 f'require("{module_name}")',
             ]
-        elif language.value == "go":
+        elif language.name == "go":
             return [
                 f'"{module_name}"',
             ]
@@ -640,7 +644,7 @@ class TreeSitterCallGraphAnalyzer(CallGraphAnalyzer):
             "cpp": ["cpp", "hpp", "cc", "hh"],
         }
         
-        return extension_map.get(language.value, [language.value])
+        return extension_map.get(language.name, [language.name])
     
     def _is_comment_line(self, line: str, language: Language) -> bool:
         """Check if a line is a comment.
@@ -654,9 +658,9 @@ class TreeSitterCallGraphAnalyzer(CallGraphAnalyzer):
         """
         stripped = line.strip()
         
-        if language.value == "python":
+        if language.name == "python":
             return stripped.startswith("#")
-        elif language.value in ("javascript", "typescript", "go", "java", "c", "cpp", "rust"):
+        elif language.name in ("javascript", "typescript", "go", "java", "c", "cpp", "rust"):
             return stripped.startswith("//") or stripped.startswith("/*")
         
         return False
@@ -713,9 +717,9 @@ class TreeSitterCallGraphAnalyzer(CallGraphAnalyzer):
         """
         stripped = line.strip()
         
-        if language.value == "python":
+        if language.name == "python":
             return f"def {function_name}(" in stripped or f"async def {function_name}(" in stripped
-        elif language.value in ("javascript", "typescript"):
+        elif language.name in ("javascript", "typescript"):
             return (
                 f"function {function_name}(" in stripped or
                 f"const {function_name} =" in stripped or
@@ -723,7 +727,7 @@ class TreeSitterCallGraphAnalyzer(CallGraphAnalyzer):
                 f"var {function_name} =" in stripped or
                 f"{function_name}(" in stripped and "=>" in stripped
             )
-        elif language.value == "go":
+        elif language.name == "go":
             return f"func {function_name}(" in stripped
         
         return False
