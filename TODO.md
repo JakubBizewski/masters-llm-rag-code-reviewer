@@ -28,11 +28,11 @@ Lista zadań do ukończenia, aby system był w 100% gotowy do produkcji.
   - Obsługa różnych modeli Claude (opus, sonnet, haiku)
   - Testy
 
-- [ ] **GitHub Checks Adapter** - `infrastructure/ci/github_checks_adapter.py`
-  - Implementacja `StaticAnalyzer` dla GitHub Checks API
-  - Pobieranie wyników check runs
-  - Parsowanie różnych formatów (Ruff, mypy, ESLint, etc.)
-  - Testy
+- [x] **GitHub Checks Adapter** - `infrastructure/ci/github_checks_adapter.py`
+  - ✅ Implementacja `StaticAnalyzer` dla GitHub Checks API
+  - ✅ Pobieranie wyników check runs
+  - ✅ Parsowanie różnych formatów (Ruff, mypy, ESLint, etc.)
+  - ✅ Testy
 
 - [ ] **GitLab CI Adapter** - `infrastructure/ci/gitlab_ci_adapter.py`
   - Implementacja `StaticAnalyzer` dla GitLab CI

@@ -26,7 +26,19 @@ logger = get_logger(__name__)
 class OpenAIAdapter(LLMProvider):
     """Adapter for OpenAI GPT models."""
     
-    def __init__(self, api_key: str, model: str = "gpt-4o"):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gpt-4o",
+        ci_parsing_model: str = "gpt-4o-mini",
+    ):
+        """Initialize OpenAI adapter.
+        
+        Args:
+            api_key: OpenAI API key
+            model: Main model for code reviews (default: gpt-4o)
+            ci_parsing_model: Cheaper model for CI parsing (default: gpt-4o-mini)
+        """
         if not OPENAI_AVAILABLE:
             raise LLMProviderError(
                 "OpenAI package not installed. Install with: pip install openai"
@@ -34,6 +46,7 @@ class OpenAIAdapter(LLMProvider):
         
         self.client = AsyncOpenAI(api_key=api_key)
         self.model = model
+        self.ci_parsing_model = ci_parsing_model
     
     async def generate_review_comments(
         self,
@@ -191,45 +204,59 @@ Focus on: correctness, security, performance, maintainability, and adherence to 
         ci_result: CIToolResult,
         changed_files: set[str],
     ) -> list[ParsedCIIssue]:
-        """Parse CI tool output and extract relevant issues."""
+        """Parse CI tool output and extract relevant issues.
+        
+        Uses cheaper GPT-4o-mini model for parsing raw CI outputs.
+        Filters issues to only include those related to changed files.
+        """
         try:
-            prompt = f"""Parse the following CI tool output and extract issues relevant to these changed files:
-{', '.join(changed_files)}
+            prompt = f"""You are a CI output parser. Extract issues from the tool output below that are relevant to the changed files.
 
-Tool: {ci_result.tool_name}
-Status: {ci_result.status}
+## Changed Files
+{', '.join(sorted(changed_files))}
 
-Output:
+## CI Tool Output
+**Tool**: {ci_result.tool_name}
+**Status**: {ci_result.status}
+**Conclusion**: {ci_result.conclusion}
+
 ```
-{ci_result.raw_output[:2000]}  # Limit output size
+{ci_result.raw_output[:3000]}
 ```
 
-Extract issues in JSON format:
+## Task
+1. Parse the output above (any format: JSON, text, logs)
+2. Extract only issues related to the changed files listed above
+3. Return structured JSON with the following format:
+
 {{
   "issues": [
     {{
-      "file_path": "<path>",
-      "line_number": <number or null>,
-      "severity": "error|warning|info",
-      "issue_code": "<code or null>",
-      "message": "<message>",
-      "suggestion": "<fix suggestion or null>"
+      "file_path": "path/to/file.py",
+      "line_number": 42,  // or null if not available
+      "severity": "error",  // error, warning, or info
+      "issue_code": "E501",  // tool-specific code, or null
+      "message": "Line too long (120 > 88 characters)",
+      "suggestion": "Break line into multiple lines"  // or null
     }}
   ]
 }}
+
+**Important**: Only include issues for files in the changed files list. Ignore issues for other files.
 """
             
             response = await self.client.chat.completions.create(
-                model=self.model,
+                model=self.ci_parsing_model,  # Use cheaper model
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a CI output parser. Extract structured issue information.",
+                        "content": "You are an expert at parsing CI/CD tool outputs in any format. "
+                                 "Extract structured issue information accurately.",
                     },
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.1,  # Low temperature for structured output
-                max_tokens=1500,
+                max_tokens=2000,
             )
             
             result = response.choices[0].message.content

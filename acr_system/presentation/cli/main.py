@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from acr_system.application.dto.dto import PRReviewRequest, ReviewPublishRequest
 from acr_system.application.use_cases.process_pull_request import ProcessPullRequestUseCase
 from acr_system.application.use_cases.publish_review import PublishReviewUseCase
+from acr_system.infrastructure.ci.github_checks_adapter import GitHubChecksAdapter
 from acr_system.infrastructure.config.yaml_config_loader import YAMLConfigLoader
 from acr_system.infrastructure.llm.openai_adapter import OpenAIAdapter
 from acr_system.infrastructure.rag.faiss_store import FAISSStore
@@ -86,12 +87,16 @@ async def _review_async(
         # Initialize config loader
         config_loader = YAMLConfigLoader(vcs_repository=vcs_adapter)
         
+        # Initialize CI analyzer
+        ci_analyzer = GitHubChecksAdapter(token=github_token)
+        
         # Create use case
         process_pr = ProcessPullRequestUseCase(
             vcs_repository=vcs_adapter,
             llm_provider=llm_adapter,
             embedding_store=rag_store,
             config_repository=config_loader,
+            static_analyzer=ci_analyzer,
         )
         
         # Execute review
@@ -142,6 +147,7 @@ async def _review_async(
         
         # Cleanup
         await vcs_adapter.close()
+        await ci_analyzer.close()
         
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
