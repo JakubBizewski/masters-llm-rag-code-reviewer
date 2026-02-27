@@ -56,17 +56,18 @@ def mock_context_builder():
 @pytest.fixture
 def call_graph_analyzer(mock_vcs_repository, mock_ast_parser):
     """Call graph analyzer instance."""
-    return TreeSitterCallGraphAnalyzer(
-        vcs_repository=mock_vcs_repository,
-        ast_parser=mock_ast_parser,
-        repo_path="/test/repo",
-    )
+    with patch('acr_system.infrastructure.analysis.tree_sitter_call_graph_analyzer.TREE_SITTER_AVAILABLE', True):
+        return TreeSitterCallGraphAnalyzer(
+            vcs=mock_vcs_repository,
+            ast_parser=mock_ast_parser,
+            repo_base_path="/test/repo",
+        )
 
 
 @pytest.fixture
 def impact_analyzer(mock_llm_provider):
     """Impact analyzer instance."""
-    return LLMImpactAnalyzer(llm_provider=mock_llm_provider)
+    return LLMImpactAnalyzer(llm=mock_llm_provider)
 
 
 @pytest.fixture
