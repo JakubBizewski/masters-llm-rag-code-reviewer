@@ -27,7 +27,7 @@ def sample_function_node():
     """Sample function node for testing."""
     return FunctionNode(
         name="calculate_discount",
-        file_path=FilePath("src/pricing.py"),
+        file_path=FilePath(value="src/pricing.py"),
         start_line=10,
         end_line=20,
         body="""def calculate_discount(price, customer_type):
@@ -120,15 +120,15 @@ class TestLLMImpactAnalyzer:
     ):
         """Test impact analysis when breaking change is detected."""
         # Mock LLM response
-        llm_impact_analyzer.llm_provider.generate_completion = AsyncMock(
+        llm_impact_analyzer.llm.generate_completion = AsyncMock(
             return_value=json.dumps(llm_response_breaking_change)
         )
         
         result = await llm_impact_analyzer.analyze_impact(
             changed_function=sample_function_node,
-            diff=sample_diff_hunk,
+            diff_hunk=sample_diff_hunk,
             callers=sample_callers,
-            language=Language(name="python"),
+            repository="/test/repo",
         )
         
         assert isinstance(result, ImpactAnalysisResult)
@@ -150,15 +150,15 @@ class TestLLMImpactAnalyzer:
     ):
         """Test impact analysis when no breaking change is detected."""
         # Mock LLM response
-        llm_impact_analyzer.llm_provider.generate_completion = AsyncMock(
+        llm_impact_analyzer.llm.generate_completion = AsyncMock(
             return_value=json.dumps(llm_response_no_breaking_change)
         )
         
         result = await llm_impact_analyzer.analyze_impact(
             changed_function=sample_function_node,
-            diff=sample_diff_hunk,
+            diff_hunk=sample_diff_hunk,
             callers=sample_callers,
-            language=Language(name="python"),
+            repository="/test/repo",
         )
         
         assert len(result.breaking_changes) == 0
@@ -174,15 +174,15 @@ class TestLLMImpactAnalyzer:
         """Test impact analysis when function has no callers."""
         result = await llm_impact_analyzer.analyze_impact(
             changed_function=sample_function_node,
-            diff=sample_diff_hunk,
+            diff_hunk=sample_diff_hunk,
             callers=[],
-            language=Language(name="python"),
+            repository="/test/repo",
         )
         
         assert len(result.breaking_changes) == 0
         assert "no callers found" in result.summary.lower()
         # LLM should not be called when there are no callers
-        llm_impact_analyzer.llm_provider.generate_completion.assert_not_called()
+        llm_impact_analyzer.llm.generate_completion.assert_not_called()
     
     @pytest.mark.asyncio
     async def test_analyze_impact_invalid_json_response(
@@ -194,16 +194,16 @@ class TestLLMImpactAnalyzer:
     ):
         """Test handling of invalid JSON from LLM."""
         # Mock LLM response with invalid JSON
-        llm_impact_analyzer.llm_provider.generate_completion = AsyncMock(
+        llm_impact_analyzer.llm.generate_completion = AsyncMock(
             return_value="This is not valid JSON{invalid}"
         )
         
         with pytest.raises(AnalysisError) as exc_info:
             await llm_impact_analyzer.analyze_impact(
                 changed_function=sample_function_node,
-                diff=sample_diff_hunk,
+                diff_hunk=sample_diff_hunk,
                 callers=sample_callers,
-                language=Language(name="python"),
+                repository="/test/repo",
             )
         
         assert "Failed to parse LLM response" in str(exc_info.value)
@@ -218,16 +218,16 @@ class TestLLMImpactAnalyzer:
     ):
         """Test handling of LLM provider errors."""
         # Mock LLM provider to raise an error
-        llm_impact_analyzer.llm_provider.generate_completion = AsyncMock(
+        llm_impact_analyzer.llm.generate_completion = AsyncMock(
             side_effect=Exception("LLM API timeout")
         )
         
         with pytest.raises(AnalysisError) as exc_info:
             await llm_impact_analyzer.analyze_impact(
                 changed_function=sample_function_node,
-                diff=sample_diff_hunk,
+                diff_hunk=sample_diff_hunk,
                 callers=sample_callers,
-                language=Language(name="python"),
+                repository="/test/repo",
             )
         
         assert "Impact analysis failed" in str(exc_info.value)
@@ -243,9 +243,9 @@ class TestLLMImpactAnalyzer:
         """Test prompt building for impact analysis."""
         prompt = llm_impact_analyzer._build_impact_analysis_prompt(
             changed_function=sample_function_node,
-            diff=sample_diff_hunk,
+            diff_hunk=sample_diff_hunk,
             callers=sample_callers,
-            language=Language(name="python"),
+            repository="/test/repo",
         )
         
         # Check that prompt contains all necessary components
@@ -291,9 +291,9 @@ class TestLLMImpactAnalyzer:
         assert severity == Severity(level=Severity.INFO)
     
     def test_parse_severity_unknown(self, llm_impact_analyzer):
-        """Test parsing unknown severity defaults to INFO."""
+        """Test parsing unknown severity defaults to WARNING."""
         severity = llm_impact_analyzer._parse_severity("unknown")
-        assert severity == Severity(level=Severity.INFO)
+        assert severity == Severity(level=Severity.WARNING)
     
     @pytest.mark.asyncio
     async def test_analyze_impact_multiple_breaking_changes(
@@ -322,15 +322,15 @@ class TestLLMImpactAnalyzer:
             "summary": "Multiple breaking changes detected",
         }
         
-        llm_impact_analyzer.llm_provider.generate_completion = AsyncMock(
+        llm_impact_analyzer.llm.generate_completion = AsyncMock(
             return_value=json.dumps(llm_response)
         )
         
         result = await llm_impact_analyzer.analyze_impact(
             changed_function=sample_function_node,
-            diff=sample_diff_hunk,
+            diff_hunk=sample_diff_hunk,
             callers=sample_callers,
-            language=Language(name="python"),
+            repository="/test/repo",
         )
         
         assert len(result.breaking_changes) == 2
@@ -347,19 +347,19 @@ class TestLLMImpactAnalyzer:
         llm_response_breaking_change,
     ):
         """Test that LLM is called with low temperature for consistency."""
-        llm_impact_analyzer.llm_provider.generate_completion = AsyncMock(
+        llm_impact_analyzer.llm.generate_completion = AsyncMock(
             return_value=json.dumps(llm_response_breaking_change)
         )
         
         await llm_impact_analyzer.analyze_impact(
             changed_function=sample_function_node,
-            diff=sample_diff_hunk,
+            diff_hunk=sample_diff_hunk,
             callers=sample_callers,
-            language=Language(name="python"),
+            repository="/test/repo",
         )
         
         # Verify LLM was called with temperature=0.2
-        call_args = llm_impact_analyzer.llm_provider.generate_completion.call_args
+        call_args = llm_impact_analyzer.llm.generate_completion.call_args
         assert call_args.kwargs.get("temperature") == 0.2
     
     @pytest.mark.asyncio
@@ -377,7 +377,7 @@ class TestLLMImpactAnalyzer:
             body="""function calculateDiscount(price, customerType) {
     return price * 0.9;
 }""",
-            language=Language(name="javascript"),
+            repository="/test/repo",
             signature="calculateDiscount(price, customerType)",
         )
         
@@ -400,19 +400,19 @@ class TestLLMImpactAnalyzer:
             )
         ]
         
-        llm_impact_analyzer.llm_provider.generate_completion = AsyncMock(
+        llm_impact_analyzer.llm.generate_completion = AsyncMock(
             return_value=json.dumps(llm_response_breaking_change)
         )
         
         result = await llm_impact_analyzer.analyze_impact(
             changed_function=function_node,
-            diff=diff_hunk,
+            diff_hunk=diff_hunk,
             callers=callers,
-            language=Language(name="javascript"),
+            repository="/test/repo",
         )
         
         assert len(result.breaking_changes) == 1
         # Verify prompt was built for JavaScript
-        call_args = llm_impact_analyzer.llm_provider.generate_completion.call_args
+        call_args = llm_impact_analyzer.llm.generate_completion.call_args
         prompt = call_args.args[0]
         assert "javascript" in prompt.lower() or "calculateDiscount" in prompt

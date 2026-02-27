@@ -191,7 +191,7 @@ class LLMImpactAnalyzer(ImpactAnalyzer):
             return self.prompt_template.format(
                 function_name=changed_function.name,
                 file_path=changed_function.file_path.value,
-                language=changed_function.language.value,
+                language=changed_function.language.name,
                 start_line=changed_function.start_line,
                 end_line=changed_function.end_line,
                 diff_content=diff_hunk.content,
@@ -203,7 +203,7 @@ class LLMImpactAnalyzer(ImpactAnalyzer):
         # Default template
         return f"""# Impact Analysis for Code Change
 
-## Changed Function: `{changed_function.name}` ({changed_function.language.value})
+## Changed Function: `{changed_function.name}` ({changed_function.language.name})
 
 **File:** {changed_function.file_path.value}  
 **Lines:** {changed_function.start_line}-{changed_function.end_line}
@@ -218,7 +218,7 @@ class LLMImpactAnalyzer(ImpactAnalyzer):
 ---
 
 ### Full Function Body (After Change):
-```{changed_function.language.value}
+```{changed_function.language.name}
 {changed_function.body}
 ```
 
