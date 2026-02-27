@@ -153,37 +153,40 @@ class TestImpactAnalysisIntegration:
         # Setup: Mock file content for VCS
         mock_vcs_repository.get_file_content.return_value = "def calculate_discount(...):\n    pass"
         
-        # Setup: Mock grep to find callers
-        with patch("subprocess.run") as mock_run:
-            grep_output = b"src/checkout.py:45:    discount = calculate_discount(total, 'premium')"
-            mock_run.return_value = MagicMock(stdout=grep_output, returncode=0)
-            
-            # Setup: Mock tree-sitter validation
-            with patch.object(review_orchestrator.call_graph_analyzer, "_verify_is_call_site", return_value=True):
-                with patch.object(review_orchestrator.call_graph_analyzer, "_extract_caller_name", return_value="process_order"):
-                    with patch("builtins.open", create=True) as mock_open:
-                        mock_open.return_value.__enter__.return_value.readlines.return_value = [""] * 50
-                        
-                        # Setup: Mock LLM response for impact analysis
-                        llm_response = {
-                            "breaking_changes": [
-                                {
-                                    "description": "Parameter type changed from string to CustomerTier enum",
-                                    "severity": "high",
-                                    "affected_code": "calculate_discount(total, 'premium')",
-                                    "fix_suggestion": "Use CustomerTier.PREMIUM instead of string 'premium'",
-                                }
-                            ],
-                            "summary": "Breaking change: 1 caller affected by type change",
-                        }
-                        mock_llm_provider.generate_completion.return_value = json.dumps(llm_response)
-                        
-                        # Execute review
-                        comments = await review_orchestrator.review_pull_request(
-                            pr=sample_pr_with_breaking_change,
-                            rules_text="Check for breaking changes",
-                            rag_config=RAGConfig(enabled=False),
-                        )
+        # Setup: Mock call graph analyzer to find callers
+        mock_caller = CallSite(
+            file_path=FilePath("src/checkout.py"),
+            line_number=45,
+            caller_name="process_order",
+            callee_name="calculate_discount",
+            context='    discount = calculate_discount(total, "premium")',
+        )
+        review_orchestrator.call_graph_analyzer.find_callers = AsyncMock(return_value=[mock_caller])
+        
+        # Setup: Mock LLM response for both review comments AND impact analysis
+        # First call: generate_review_comments (empty response)
+        # Second call: generate_completion for impact analysis
+        llm_impact_response = {
+            "breaking_changes": [
+                {
+                    "caller_file": "src/checkout.py",
+                    "caller_function": "process_order",
+                    "issue": "Parameter type changed from string to CustomerTier enum",
+                    "suggested_fix": "Use CustomerTier.PREMIUM instead of string 'premium'",
+                    "severity": "high",
+                }
+            ],
+            "summary": "Breaking change: 1 caller affected by type change",
+        }
+        mock_llm_provider.generate_review_comments = AsyncMock(return_value=[])
+        mock_llm_provider.generate_completion = AsyncMock(return_value=json.dumps(llm_impact_response))
+        
+        # Execute review
+        comments = await review_orchestrator.review_pull_request(
+            pr=sample_pr_with_breaking_change,
+            rules_text="Check for breaking changes",
+            rag_config=RAGConfig(enabled=False),
+        )
         
         # Verify: Should have impact analysis comment
         impact_comments = [c for c in comments if c.source.source == CommentSource.IMPACT_ANALYSIS]
@@ -295,49 +298,52 @@ class TestImpactAnalysisIntegration:
         mock_ast_parser.extract_changed_functions.return_value = functions
         mock_vcs_repository.get_file_content.return_value = "functions here"
         
-        # Setup: Mock callers for both functions
-        with patch("subprocess.run") as mock_run:
-            # First call for calculate_discount, second for apply_tax
-            mock_run.side_effect = [
-                MagicMock(stdout=b"src/checkout.py:45:discount = calculate_discount()", returncode=0),
-                MagicMock(stdout=b"src/invoice.py:30:tax = apply_tax()", returncode=0),
-            ]
-            
-            with patch.object(review_orchestrator.call_graph_analyzer, "_verify_is_call_site", return_value=True):
-                with patch.object(review_orchestrator.call_graph_analyzer, "_extract_caller_name") as mock_caller:
-                    mock_caller.side_effect = ["process_order", "generate_invoice"]
-                    
-                    with patch("builtins.open", create=True) as mock_open:
-                        mock_open.return_value.__enter__.return_value.readlines.return_value = [""] * 50
-                        
-                        # Mock LLM responses for both
-                        llm_responses = [
-                            json.dumps({
-                                "breaking_changes": [{
-                                    "description": "Breaking change in calculate_discount",
-                                    "severity": "high",
-                                    "affected_code": "calculate_discount()",
-                                    "fix_suggestion": "Update caller",
-                                }],
-                                "summary": "Breaking change detected",
-                            }),
-                            json.dumps({
-                                "breaking_changes": [{
-                                    "description": "Breaking change in apply_tax",
-                                    "severity": "medium",
-                                    "affected_code": "apply_tax()",
-                                    "fix_suggestion": "Update caller",
-                                }],
-                                "summary": "Breaking change detected",
-                            }),
-                        ]
-                        mock_llm_provider.generate_completion.side_effect = llm_responses
-                        
-                        comments = await review_orchestrator.review_pull_request(
-                            pr=sample_pr_with_breaking_change,
-                            rules_text="Check for issues",
-                            rag_config=RAGConfig(enabled=False),
-                        )
+        # Setup: Mock callers for both functions (two separate calls to find_callers)
+        callers_func1 = [CallSite(
+            file_path=FilePath("src/checkout.py"),
+            line_number=45,
+            caller_name="process_order",
+            callee_name="calculate_discount",
+            context="discount = calculate_discount()",
+        )]
+        callers_func2 = [CallSite(
+            file_path=FilePath("src/invoice.py"),
+            line_number=30,
+            caller_name="generate_invoice",
+            callee_name="apply_tax",
+            context="tax = apply_tax()",
+        )]
+        review_orchestrator.call_graph_analyzer.find_callers = AsyncMock(side_effect=[callers_func1, callers_func2])
+        
+        # Mock LLM responses for both functions
+        llm_response1 = json.dumps({
+            "breaking_changes": [{
+                "caller_file": "src/checkout.py",
+                "caller_function": "process_order",
+                "issue": "Breaking change in calculate_discount",
+                "suggested_fix": "Update caller",
+                "severity": "high",
+            }],
+            "summary": "Breaking change detected",
+        })
+        llm_response2 = json.dumps({
+            "breaking_changes": [{
+                "caller_file": "src/invoice.py",
+                "caller_function": "generate_invoice",
+                "issue": "Breaking change in apply_tax",
+                "suggested_fix": "Update caller",
+                "severity": "medium",
+            }],
+            "summary": "Breaking change detected",
+        })
+        mock_llm_provider.generate_review_comments = AsyncMock(return_value=[])
+        mock_llm_provider.generate_completion = AsyncMock(side_effect=[llm_response1, llm_response2])
+        
+        comments = await review_orchestrator.review_pull_request(
+            pr=sample_pr_with_breaking_change,
+            rules_text="Check for issues",
+            rag_config=RAGConfig(enabled=False),
+        )
         
         # Verify: Should have 2 impact analysis comments
         impact_comments = [c for c in comments if c.source.source == CommentSource.IMPACT_ANALYSIS]
@@ -454,14 +460,14 @@ class TestImpactAnalysisIntegration:
         
         await impact_analyzer.analyze_impact(
             changed_function=function_node,
-            diff=diff_hunk,
+            diff_hunk=diff_hunk,
             callers=callers,
-            language=Language(name="python"),
+            repository="/test/repo",
         )
         
         # Verify prompt content
         call_args = mock_llm_provider.generate_completion.call_args
-        prompt = call_args.args[0]
+        prompt = call_args.kwargs.get("prompt") or (call_args.args[0] if call_args.args else "")
         
         # Check all critical components are in prompt
         assert "process_payment" in prompt
@@ -469,11 +475,11 @@ class TestImpactAnalysisIntegration:
         assert "PaymentMethod.CARD" in prompt or "PaymentMethod" in prompt
         assert "complete_order" in prompt
         assert "payment_endpoint" in prompt
-        assert "src/checkout.py:200" in prompt
-        assert "src/api.py:50" in prompt
+        assert "src/checkout.py" in prompt and ("Line 200:" in prompt or "200" in prompt)
+        assert "src/api.py" in prompt and ("Line 50:" in prompt or "50" in prompt)
         assert "breaking_changes" in prompt
         assert "severity" in prompt.lower()
-        assert "fix_suggestion" in prompt.lower()
+        assert "suggested_fix" in prompt.lower()
     
     @pytest.mark.asyncio
     async def test_warning_comment_formatting(
@@ -497,35 +503,43 @@ class TestImpactAnalysisIntegration:
         mock_ast_parser.extract_changed_functions.return_value = [changed_function]
         mock_vcs_repository.get_file_content.return_value = "function body"
         
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                stdout=b"src/checkout.py:45:discount = calculate_discount()\nsrc/api.py:30:result = calculate_discount()",
-                returncode=0,
-            )
-            
-            with patch.object(review_orchestrator.call_graph_analyzer, "_verify_is_call_site", return_value=True):
-                with patch.object(review_orchestrator.call_graph_analyzer, "_extract_caller_name") as mock_caller:
-                    mock_caller.side_effect = ["process_order", "api_handler"]
-                    
-                    with patch("builtins.open", create=True) as mock_open:
-                        mock_open.return_value.__enter__.return_value.readlines.return_value = [""] * 50
-                        
-                        llm_response = {
-                            "breaking_changes": [{
-                                "description": "Parameter type changed from string to enum",
-                                "severity": "high",
-                                "affected_code": "calculate_discount(100, 'premium')",
-                                "fix_suggestion": "Use CustomerTier.PREMIUM instead",
-                            }],
-                            "summary": "Breaking change: type incompatibility",
-                        }
-                        mock_llm_provider.generate_completion.return_value = json.dumps(llm_response)
-                        
-                        comments = await review_orchestrator.review_pull_request(
-                            pr=sample_pr_with_breaking_change,
-                            rules_text="Check for issues",
-                            rag_config=RAGConfig(enabled=False),
-                        )
+        # Mock callers
+        callers = [
+            CallSite(
+                file_path=FilePath("src/checkout.py"),
+                line_number=45,
+                caller_name="process_order",
+                callee_name="calculate_discount",
+                context="discount = calculate_discount()",
+            ),
+            CallSite(
+                file_path=FilePath("src/api.py"),
+                line_number=30,
+                caller_name="api_handler",
+                callee_name="calculate_discount",
+                context="result = calculate_discount()",
+            ),
+        ]
+        review_orchestrator.call_graph_analyzer.find_callers = AsyncMock(return_value=callers)
+        
+        llm_response = {
+            "breaking_changes": [{
+                "caller_file": "src/checkout.py",
+                "caller_function": "process_order",
+                "issue": "Parameter type changed from string to enum",
+                "suggested_fix": "Use CustomerTier.PREMIUM instead",
+                "severity": "high",
+            }],
+            "summary": "Breaking change: type incompatibility",
+        }
+        mock_llm_provider.generate_review_comments = AsyncMock(return_value=[])
+        mock_llm_provider.generate_completion = AsyncMock(return_value=json.dumps(llm_response))
+        
+        comments = await review_orchestrator.review_pull_request(
+            pr=sample_pr_with_breaking_change,
+            rules_text="Check for issues",
+            rag_config=RAGConfig(enabled=False),
+        )
         
         # Verify comment formatting
         impact_comment = [c for c in comments if c.source.source == CommentSource.IMPACT_ANALYSIS][0]

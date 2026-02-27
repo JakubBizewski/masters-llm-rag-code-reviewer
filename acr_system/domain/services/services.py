@@ -269,9 +269,9 @@ class ReviewOrchestrator:
                     # Step 4c: Analyze impact with LLM
                     impact_result = await self.impact_analyzer.analyze_impact(
                         changed_function=func,
-                        diff=hunk,
+                        diff_hunk=hunk,
                         callers=callers,
-                        language=func.language,
+                        repository=pr.repository,
                     )
                     
                     # Step 4d: Create warning comments for breaking changes
@@ -284,10 +284,10 @@ class ReviewOrchestrator:
                                     line_number=func.start_line,
                                     severity=breaking_change.severity,
                                     message=f"⚠️ Potential Breaking Change in `{func.name}()`:\n\n"
-                                            f"{breaking_change.description}\n\n"
+                                            f"{breaking_change.issue}\n\n"
                                             f"**Affected callers:** {len(callers)}\n"
                                             f"**Impact:** {impact_result.summary}",
-                                    suggestion=breaking_change.fix_suggestion,
+                                    suggestion=breaking_change.suggested_fix,
                                     rule_name="impact_analysis",
                                     source=CommentSource(source=CommentSource.IMPACT_ANALYSIS),
                                 )
