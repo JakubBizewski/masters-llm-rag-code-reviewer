@@ -121,7 +121,6 @@ class TestTreeSitterIntegration:
     They require tree-sitter parsers to be built and available.
     """
     
-    @pytest.mark.integration
     @pytest.mark.skipif(not TREE_SITTER_AVAILABLE, reason="tree-sitter not installed")
     def test_extract_python_functions_from_real_code(self):
         """Integration test: extract functions from real Python code."""
@@ -157,7 +156,6 @@ def apply_coupon(order, coupon_code):
         assert calc_discount_func.end_line >= calc_discount_func.start_line
         assert "calculate_discount" in calc_discount_func.body
     
-    @pytest.mark.integration
     @pytest.mark.skipif(not TREE_SITTER_AVAILABLE, reason="tree-sitter not installed")
     def test_extract_python_classes_from_real_code(self):
         """Integration test: extract classes from real Python code."""
@@ -188,7 +186,6 @@ class AdminUser:
         assert "UserRepository" in class_names
         assert "AdminUser" in class_names
     
-    @pytest.mark.integration
     @pytest.mark.skipif(not TREE_SITTER_AVAILABLE, reason="tree-sitter not installed")
     def test_extract_python_imports_from_real_code(self):
         """Integration test: extract imports from real Python code."""

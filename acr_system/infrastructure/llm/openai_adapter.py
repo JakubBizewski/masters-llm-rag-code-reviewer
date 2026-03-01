@@ -1,5 +1,5 @@
 """OpenAI adapter for LLM operations."""
-from typing import Optional
+from typing import List, Optional, Set
 
 try:
     from openai import AsyncOpenAI
@@ -52,11 +52,11 @@ class OpenAIAdapter(LLMProvider):
         self,
         diff_hunk: DiffHunk,
         rules_text: str,
-        context: list[CodeContext],
-        ci_issues: list[ParsedCIIssue],
+        context: List[CodeContext],
+        ci_issues: List[ParsedCIIssue],
         temperature: float = 0.3,
         max_tokens: int = 2000,
-    ) -> list[ReviewComment]:
+    ) -> List[ReviewComment]:
         """Generate review comments for a diff hunk."""
         try:
             prompt = self._build_review_prompt(
@@ -95,8 +95,8 @@ class OpenAIAdapter(LLMProvider):
         self,
         diff_hunk: DiffHunk,
         rules_text: str,
-        context: list[CodeContext],
-        ci_issues: list[ParsedCIIssue],
+        context: List[CodeContext],
+        ci_issues: List[ParsedCIIssue],
     ) -> str:
         """Build prompt for code review."""
         prompt = f"""# Code Review Task
@@ -151,7 +151,7 @@ Focus on: correctness, security, performance, maintainability, and adherence to 
         self,
         response: Optional[str],
         diff_hunk: DiffHunk,
-    ) -> list[ReviewComment]:
+    ) -> List[ReviewComment]:
         """Parse LLM response into ReviewComment objects."""
         import json
         
@@ -202,8 +202,8 @@ Focus on: correctness, security, performance, maintainability, and adherence to 
     async def parse_ci_output(
         self,
         ci_result: CIToolResult,
-        changed_files: set[str],
-    ) -> list[ParsedCIIssue]:
+        changed_files: Set[str],
+    ) -> List[ParsedCIIssue]:
         """Parse CI tool output and extract relevant issues.
         
         Uses cheaper GPT-4o-mini model for parsing raw CI outputs.
