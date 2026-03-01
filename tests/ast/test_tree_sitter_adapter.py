@@ -30,7 +30,7 @@ class TestTreeSitterAdapter:
         code = "def foo():\n    pass"
         
         # This may fail if python parser not available, which is OK for unit test
-        functions = adapter.extract_functions(code, Language.PYTHON)
+        functions = adapter.extract_functions(code, Language(name="python"))
         
         assert isinstance(functions, list)
     
@@ -43,24 +43,27 @@ class TestTreeSitterAdapter:
             mock_extract.return_value = [
                 FunctionNode(
                     name="func_a",
+                    file_path=FilePath("test.py"),
                     start_line=1,
                     end_line=3,
                     body="def func_a():\n    pass",
-                    language=Language.PYTHON,
+                    language=Language(name="python"),
                 ),
                 FunctionNode(
                     name="func_b",
+                    file_path=FilePath("test.py"),
                     start_line=10,
                     end_line=15,
                     body="def func_b():\n    pass",
-                    language=Language.PYTHON,
+                    language=Language(name="python"),
                 ),
                 FunctionNode(
                     name="func_c",
+                    file_path=FilePath("test.py"),
                     start_line=20,
                     end_line=25,
                     body="def func_c():\n    pass",
-                    language=Language.PYTHON,
+                    language=Language(name="python"),
                 ),
             ]
             
@@ -74,7 +77,7 @@ class TestTreeSitterAdapter:
                 content="+ # Modified func_b",
             )
             
-            changed = adapter.extract_changed_functions(diff, "code", Language.PYTHON)
+            changed = adapter.extract_changed_functions(diff, "code", Language(name="python"))
             
             # Should only return func_b (lines 10-15)
             assert len(changed) == 1
@@ -140,7 +143,7 @@ def apply_coupon(order, coupon_code):
     return order
 """
         
-        functions = adapter.extract_functions(code, Language.PYTHON)
+        functions = adapter.extract_functions(code, Language(name="python"))
         
         # Should extract 2 functions
         assert len(functions) >= 2
@@ -176,7 +179,7 @@ class AdminUser:
     pass
 """
         
-        classes = adapter.extract_classes(code, Language.PYTHON)
+        classes = adapter.extract_classes(code, Language(name="python"))
         
         # Should extract 2 classes
         assert len(classes) >= 2
@@ -199,7 +202,7 @@ from pathlib import Path
 from .models import User, Order
 """
         
-        imports = adapter.extract_imports(code, Language.PYTHON)
+        imports = adapter.extract_imports(code, Language(name="python"))
         
         # Should extract imports
         assert len(imports) >= 3

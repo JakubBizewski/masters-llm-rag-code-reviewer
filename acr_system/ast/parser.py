@@ -1,9 +1,9 @@
 """AST Parser interface (port)."""
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Optional
 
 from acr_system.domain.entities.entities import DiffHunk, FunctionNode
-from acr_system.domain.value_objects.value_objects import Language
+from acr_system.domain.value_objects.value_objects import FilePath, Language
 
 
 class ASTParser(ABC):
@@ -14,7 +14,7 @@ class ASTParser(ABC):
     """
     
     @abstractmethod
-    def extract_functions(self, code: str, language: Language) -> List[FunctionNode]:
+    def extract_functions(self, code: str, language: Language, file_path: Optional[FilePath] = None) -> List[FunctionNode]:
         """Ekstrakcja funkcji z kodu źródłowego.
         
         Używane do augmentacji kontekstu RAG (izolacja funkcji, call graph).
@@ -22,6 +22,7 @@ class ASTParser(ABC):
         Args:
             code: Kod źródłowy do parsowania
             language: Język programowania (Python, JavaScript, etc.)
+            file_path: Ścieżka do pliku (opcjonalna, domyślnie "unknown")
             
         Returns:
             Lista wyekstrahowanych funkcji z metadanymi (nazwa, linie, ciało)

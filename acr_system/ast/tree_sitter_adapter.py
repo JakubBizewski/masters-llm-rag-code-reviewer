@@ -14,7 +14,7 @@ except ImportError:
 from acr_system.ast.language_registry import LanguageRegistry
 from acr_system.ast.parser import ASTParser
 from acr_system.domain.entities.entities import DiffHunk, FunctionNode
-from acr_system.domain.value_objects.value_objects import Language
+from acr_system.domain.value_objects.value_objects import FilePath, Language
 from acr_system.shared.exceptions.infrastructure_exceptions import ASTParseError
 from acr_system.shared.logging.logger import get_logger
 
@@ -63,7 +63,7 @@ class TreeSitterAdapter(ASTParser):
         
         strategy = LanguageRegistry.get_strategy(language)
         if not strategy:
-            logger.warning(f"No strategy registered for {language.value}")
+            logger.warning(f"No strategy registered for {language.name}")
             return None
         
         try:
@@ -73,18 +73,24 @@ class TreeSitterAdapter(ASTParser):
             # Create parser
             parser = Parser()
             
-            # Load language (requires tree-sitter-{language} to be built)
-            # In production, languages should be pre-built and loaded from .so files
-            # For now, we'll try to import the language module
+            # Load language (requires tree-sitter-{language} to be installed)
+            # Try to import the language module dynamically
             try:
-                ts_language = TSLanguage(f"tree-sitter-{parser_name}", parser_name)
-                parser.set_language(ts_language)
+                # Import tree_sitter_{language} module and get language()
+                import importlib
+                module_name = f"tree_sitter_{parser_name}"
+                language_module = importlib.import_module(module_name)
+                
+                # Get language function and wrap in tree_sitter.Language
+                language_capsule = language_module.language()
+                ts_language = TSLanguage(language_capsule)
+                parser.language = ts_language
                 
                 # Cache
                 self._parsers[language] = parser
                 self._languages[language] = ts_language
                 
-                logger.debug(f"Initialized tree-sitter parser for {language.value}")
+                logger.debug(f"Initialized tree-sitter parser for {language.name}")
                 return parser
                 
             except Exception as e:
@@ -95,22 +101,26 @@ class TreeSitterAdapter(ASTParser):
                 return None
                 
         except Exception as e:
-            logger.error(f"Error creating parser for {language.value}: {e}")
+            logger.error(f"Error creating parser for {language.name}: {e}")
             return None
     
-    def extract_functions(self, code: str, language: Language) -> List[FunctionNode]:
+    def extract_functions(self, code: str, language: Language, file_path: Optional[FilePath] = None) -> List[FunctionNode]:
         """Ekstrakcja funkcji z kodu źródłowego.
         
         Args:
             code: Kod źródłowy
             language: Język programowania
+            file_path: Ścieżka do pliku (opcjonalna, domyślnie "unknown")
             
         Returns:
             Lista funkcji z metadanymi
         """
+        if file_path is None:
+            file_path = FilePath("unknown")
+        
         parser = self._get_parser(language)
         if not parser:
-            logger.warning(f"Parser not available for {language.value}")
+            logger.warning(f"Parser not available for {language.name}")
             return []
         
         strategy = LanguageRegistry.get_strategy(language)
@@ -125,30 +135,38 @@ class TreeSitterAdapter(ASTParser):
             # Get function query from strategy
             query_string = strategy.get_function_query()
             ts_language = self._languages[language]
-            query = ts_language.query(query_string)
             
-            # Execute query
-            captures = query.captures(root_node)
+            # Use Query() and QueryCursor() for tree-sitter 0.25.x
+            from tree_sitter import Query, QueryCursor
+            query = Query(ts_language, query_string)
+            cursor = QueryCursor(query)
+            
+            # Execute query - matches returns iter of (pattern_idx, captures_dict)
+            matches = cursor.matches(root_node)
             
             functions = []
-            for node, capture_name in captures:
-                if "function.def" in capture_name or "function" in capture_name:
-                    # Extract function metadata
-                    func_name = strategy.extract_function_name(node)
-                    start_line = node.start_point[0] + 1  # 1-indexed
-                    end_line = node.end_point[0] + 1
-                    body = node.text.decode("utf-8")
-                    
-                    function = FunctionNode(
-                        name=func_name,
-                        start_line=start_line,
-                        end_line=end_line,
-                        body=body,
-                        language=language,
-                    )
-                    functions.append(function)
+            for pattern_idx, captures_dict in matches:
+                # captures_dict is {capture_name: [nodes]}
+                for capture_name, nodes in captures_dict.items():
+                    if "function.def" in capture_name or "function" in capture_name:
+                        for node in nodes:
+                            # Extract function metadata
+                            func_name = strategy.extract_function_name(node)
+                            start_line = node.start_point[0] + 1  # 1-indexed
+                            end_line = node.end_point[0] + 1
+                            body = node.text.decode("utf-8")
+                            
+                            function = FunctionNode(
+                                name=func_name,
+                                file_path=file_path,
+                                start_line=start_line,
+                                end_line=end_line,
+                                body=body,
+                                language=language,
+                            )
+                            functions.append(function)
             
-            logger.debug(f"Extracted {len(functions)} functions from {language.value} code")
+            logger.debug(f"Extracted {len(functions)} functions from {language.name} code")
             return functions
             
         except Exception as e:
@@ -172,7 +190,7 @@ class TreeSitterAdapter(ASTParser):
             Lista funkcji zawierających zmiany
         """
         # Extract all functions
-        all_functions = self.extract_functions(code, language)
+        all_functions = self.extract_functions(code, language, diff.file_path)
         
         # Filter to only functions that overlap with diff
         changed_functions = []
@@ -219,28 +237,35 @@ class TreeSitterAdapter(ASTParser):
             # Get class query from strategy
             query_string = strategy.get_class_query()
             ts_language = self._languages[language]
-            query = ts_language.query(query_string)
             
-            # Execute query
-            captures = query.captures(root_node)
+            # Use Query() and QueryCursor() for tree-sitter 0.25.x
+            from tree_sitter import Query, QueryCursor
+            query = Query(ts_language, query_string)
+            cursor = QueryCursor(query)
+            
+            # Execute query - matches returns iter of (pattern_idx, captures_dict)
+            matches = cursor.matches(root_node)
             
             classes = []
-            for node, capture_name in captures:
-                if "class" in capture_name or "type" in capture_name or "interface" in capture_name:
-                    class_name = strategy.extract_class_name(node)
-                    start_line = node.start_point[0] + 1
-                    end_line = node.end_point[0] + 1
-                    body = node.text.decode("utf-8")
-                    
-                    classes.append({
-                        "name": class_name,
-                        "start_line": start_line,
-                        "end_line": end_line,
-                        "body": body,
-                        "type": capture_name,
-                    })
+            for pattern_idx, captures_dict in matches:
+                # captures_dict is {capture_name: [nodes]}
+                for capture_name, nodes in captures_dict.items():
+                    if "class" in capture_name or "type" in capture_name or "interface" in capture_name:
+                        for node in nodes:
+                            class_name = strategy.extract_class_name(node)
+                            start_line = node.start_point[0] + 1
+                            end_line = node.end_point[0] + 1
+                            body = node.text.decode("utf-8")
+                            
+                            classes.append({
+                                "name": class_name,
+                                "start_line": start_line,
+                                "end_line": end_line,
+                                "body": body,
+                                "type": capture_name,
+                            })
             
-            logger.debug(f"Extracted {len(classes)} classes from {language.value} code")
+            logger.debug(f"Extracted {len(classes)} classes from {language.name} code")
             return classes
             
         except Exception as e:
@@ -273,19 +298,26 @@ class TreeSitterAdapter(ASTParser):
             # Get import query from strategy
             query_string = strategy.get_import_query()
             ts_language = self._languages[language]
-            query = ts_language.query(query_string)
             
-            # Execute query
-            captures = query.captures(root_node)
+            # Use Query() and QueryCursor() for tree-sitter 0.25.x
+            from tree_sitter import Query, QueryCursor
+            query = Query(ts_language, query_string)
+            cursor = QueryCursor(query)
+            
+            # Execute query - matches returns iter of (pattern_idx, captures_dict)
+            matches = cursor.matches(root_node)
             
             imports = []
-            for node, capture_name in captures:
-                if "import" in capture_name or "module" in capture_name or "source" in capture_name:
-                    import_text = node.text.decode("utf-8").strip('"\'')
-                    if import_text and import_text not in imports:
-                        imports.append(import_text)
+            for pattern_idx, captures_dict in matches:
+                # captures_dict is {capture_name: [nodes]}
+                for capture_name, nodes in captures_dict.items():
+                    if "import" in capture_name or "module" in capture_name or "source" in capture_name:
+                        for node in nodes:
+                            import_text = node.text.decode("utf-8").strip('"\'')
+                            if import_text and import_text not in imports:
+                                imports.append(import_text)
             
-            logger.debug(f"Extracted {len(imports)} imports from {language.value} code")
+            logger.debug(f"Extracted {len(imports)} imports from {language.name} code")
             return imports
             
         except Exception as e:
