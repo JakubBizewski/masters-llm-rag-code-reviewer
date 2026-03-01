@@ -83,11 +83,12 @@ async def test_external_api_github_vcs_integration(
     
     # === Execute ===
     use_case = ProcessPullRequestUseCase(
-        vcs_repository=mock_vcs,
+        vcs_repository=mock_vcs_repository,
         llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
-        static_analyzer=None,
+        context_builder=mock_context_builder,
+        review_orchestrator=mock_review_orchestrator,
     )
     
     request = PRReviewRequest(repository="github/repo", pr_number=100)
@@ -193,10 +194,11 @@ async def test_external_api_openai_llm_integration(
     # === Execute ===
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
-        llm_provider=mock_llm,
+        llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
-        static_analyzer=None,
+        context_builder=mock_context_builder,
+        review_orchestrator=mock_review_orchestrator,
     )
     
     request = PRReviewRequest(repository="company/app", pr_number=200)
@@ -326,9 +328,10 @@ async def test_external_api_faiss_embedding_store_integration(
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
         llm_provider=mock_llm_provider,
-        embedding_store=mock_embedding,
+        embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
-        static_analyzer=None,
+        context_builder=mock_context_builder,
+        review_orchestrator=mock_review_orchestrator,
     )
     
     request = PRReviewRequest(repository="company/ml-app", pr_number=300)
@@ -605,10 +608,11 @@ async def test_external_api_all_services_integration(
     # === Execute ===
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
-        llm_provider=mock_llm,
+        llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
-        static_analyzer=mock_ci,
+        context_builder=mock_context_builder,
+        review_orchestrator=mock_review_orchestrator,
     )
     
     request = PRReviewRequest(repository="company/fullstack-app", pr_number=500)

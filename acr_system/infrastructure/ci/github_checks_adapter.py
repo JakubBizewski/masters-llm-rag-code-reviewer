@@ -1,5 +1,5 @@
 """GitHub Checks adapter for fetching CI/CD results."""
-from typing import Optional
+from typing import Dict, List, Optional
 
 import httpx
 
@@ -36,7 +36,7 @@ class GitHubChecksAdapter(StaticAnalyzer):
         self,
         repo: str,
         pr_number: int,
-    ) -> list[CIToolResult]:
+    ) -> List[CIToolResult]:
         """Fetch CI results for a pull request.
         
         Args:
@@ -71,7 +71,7 @@ class GitHubChecksAdapter(StaticAnalyzer):
         self,
         repo: str,
         commit_sha: str,
-    ) -> list[CIToolResult]:
+    ) -> List[CIToolResult]:
         """Get check runs for a specific commit.
         
         Args:
@@ -187,7 +187,7 @@ class GitHubChecksAdapter(StaticAnalyzer):
         self,
         check_run_id: Optional[int],
         repo: str,
-    ) -> list[dict]:
+    ) -> List[Dict]:
         """Fetch annotations (line-level issues) for a check run.
         
         Args:

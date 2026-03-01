@@ -113,7 +113,8 @@ async def test_process_pr_with_ci_checks(
         llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
-        static_analyzer=mock_ci_adapter,
+        context_builder=mock_context_builder,
+        review_orchestrator=mock_review_orchestrator,
     )
     
     # Execute
@@ -197,13 +198,24 @@ async def test_process_pr_without_ci_checks(
     mock_embedding_store.search_similar.return_value = []
     mock_embedding_store.index_review_history.return_value = None
     
-    # Create use case WITHOUT CI adapter
+    # Configure mock_review_orchestrator to return comments
+    mock_review_orchestrator.review_diff_hunk.return_value = [
+        ReviewComment(
+            file_path=FilePath("test.py"),
+            line_number=10,
+            severity=Severity(level=Severity.INFO),
+            message="Test comment",
+        )
+    ]
+    
+    # Create use case (CI is now handled inside ReviewOrchestrator)
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
         llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
-        static_analyzer=None,  # No CI checks
+        context_builder=mock_context_builder,
+        review_orchestrator=mock_review_orchestrator,
     )
     
     # Execute
@@ -370,7 +382,8 @@ async def test_ci_parsing_multiple_tools(
         llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
-        static_analyzer=mock_ci,
+        context_builder=mock_context_builder,
+        review_orchestrator=mock_review_orchestrator,
     )
     
     request = PRReviewRequest(repository="company/project", pr_number=777)
@@ -501,7 +514,8 @@ async def test_ci_parsing_with_no_issues(
         llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
-        static_analyzer=mock_ci,
+        context_builder=mock_context_builder,
+        review_orchestrator=mock_review_orchestrator,
     )
     
     request = PRReviewRequest(repository="company/clean-code", pr_number=888)
@@ -654,7 +668,8 @@ async def test_ci_parsing_with_partial_failures(
         llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
-        static_analyzer=mock_ci,
+        context_builder=mock_context_builder,
+        review_orchestrator=mock_review_orchestrator,
     )
     
     request = PRReviewRequest(repository="company/mixed", pr_number=999)
