@@ -1,6 +1,6 @@
 """Data Transfer Objects for the Application layer."""
 from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, List, Optional
 
 from acr_system.domain.entities.entities import ReviewComment
 from acr_system.domain.value_objects.value_objects import LLMConfig, RAGConfig
@@ -21,7 +21,7 @@ class ReviewResult:
     
     repository: str
     pr_number: int
-    comments: list[ReviewComment]
+    comments: List[ReviewComment]
     success: bool
     error_message: Optional[str] = None
     
@@ -52,7 +52,7 @@ class ContextRetrievalRequest:
     
     query: str
     top_k: int = 5
-    filters: Optional[dict[str, str]] = None
+    filters: Optional[Dict[str, str]] = None
 
 
 @dataclass
@@ -61,5 +61,5 @@ class ReviewPublishRequest:
     
     repository: str
     pr_number: int
-    comments: list[ReviewComment]
+    comments: List[ReviewComment]
     mode: str = "comment"  # "comment" | "review" | "approve" | "request_changes"
