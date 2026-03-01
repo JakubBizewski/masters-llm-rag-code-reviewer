@@ -15,6 +15,8 @@ async def test_process_pr_with_ci_checks(
     mock_llm_provider,
     mock_embedding_store,
     mock_config_repository,
+    mock_context_builder,
+    mock_review_orchestrator,
 ):
     """Integration test: Process PR with CI checks integration."""
     # Setup mock PR
@@ -141,6 +143,8 @@ async def test_process_pr_without_ci_checks(
     mock_llm_provider,
     mock_embedding_store,
     mock_config_repository,
+    mock_context_builder,
+    mock_review_orchestrator,
 ):
     """Integration test: Process PR without CI checks (static_analyzer=None)."""
     # Setup mock PR
@@ -220,6 +224,8 @@ async def test_ci_parsing_multiple_tools(
     mock_llm_provider,
     mock_embedding_store,
     mock_config_repository,
+    mock_context_builder,
+    mock_review_orchestrator,
 ):
     """Integration test: CI parsing with multiple CI tools (Ruff, mypy, ESLint).
     
@@ -398,6 +404,8 @@ async def test_ci_parsing_with_no_issues(
     mock_llm_provider,
     mock_embedding_store,
     mock_config_repository,
+    mock_context_builder,
+    mock_review_orchestrator,
 ):
     """Integration test: CI parsing when all checks pass.
     
@@ -523,6 +531,8 @@ async def test_ci_parsing_with_partial_failures(
     mock_llm_provider,
     mock_embedding_store,
     mock_config_repository,
+    mock_context_builder,
+    mock_review_orchestrator,
 ):
     """Integration test: CI parsing with some checks passing, some failing.
     

@@ -2,6 +2,7 @@
 from typing import Optional
 
 from acr_system.application.dto.dto import PRReviewRequest, ReviewResult
+from acr_system.ast.parser import ASTParser
 from acr_system.domain.interfaces.ports import (
     ConfigRepository,
     EmbeddingStore,
@@ -24,25 +25,15 @@ class ProcessPullRequestUseCase:
         llm_provider: LLMProvider,
         embedding_store: EmbeddingStore,
         config_repository: ConfigRepository,
-        static_analyzer: Optional[StaticAnalyzer] = None,
+        context_builder: ContextBuilder,
+        review_orchestrator: ReviewOrchestrator,
     ):
         self.vcs_repository = vcs_repository
         self.llm_provider = llm_provider
         self.embedding_store = embedding_store
         self.config_repository = config_repository
-        self.static_analyzer = static_analyzer
-        
-        # Initialize domain services
-        self.context_builder = ContextBuilder(
-            embedding_store=embedding_store,
-            vcs_repository=vcs_repository,
-        )
-        
-        self.review_orchestrator = ReviewOrchestrator(
-            llm_provider=llm_provider,
-            context_builder=self.context_builder,
-            static_analyzer=static_analyzer,
-        )
+        self.context_builder = context_builder
+        self.review_orchestrator = review_orchestrator
     
     async def execute(self, request: PRReviewRequest) -> ReviewResult:
         """Execute the pull request review use case.

@@ -14,6 +14,8 @@ async def test_external_api_github_vcs_integration(
     mock_llm_provider,
     mock_embedding_store,
     mock_config_repository,
+    mock_context_builder,
+    mock_review_orchestrator,
 ):
     """Integration test: Mocked GitHub VCS API interactions.
     
@@ -113,6 +115,8 @@ async def test_external_api_openai_llm_integration(
     mock_vcs_repository,
     mock_embedding_store,
     mock_config_repository,
+    mock_context_builder,
+    mock_review_orchestrator,
 ):
     """Integration test: Mocked OpenAI LLM API interactions.
     
@@ -226,6 +230,8 @@ async def test_external_api_faiss_embedding_store_integration(
     mock_vcs_repository,
     mock_llm_provider,
     mock_config_repository,
+    mock_context_builder,
+    mock_review_orchestrator,
 ):
     """Integration test: Mocked FAISS embedding store interactions.
     
@@ -353,6 +359,8 @@ async def test_external_api_github_checks_ci_integration(
     mock_llm_provider,
     mock_embedding_store,
     mock_config_repository,
+    mock_context_builder,
+    mock_review_orchestrator,
 ):
     """Integration test: Mocked GitHub Checks CI API interactions.
     
@@ -488,6 +496,8 @@ async def test_external_api_all_services_integration(
     mock_vcs_repository,
     mock_embedding_store,
     mock_config_repository,
+    mock_context_builder,
+    mock_review_orchestrator,
 ):
     """Integration test: All external APIs work together.
     

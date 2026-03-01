@@ -77,3 +77,31 @@ def mock_config_repository() -> AsyncMock:
     mock.load_config = AsyncMock()
     mock.get_rules_for_file = AsyncMock()
     return mock
+
+
+@pytest.fixture
+def mock_ast_parser() -> AsyncMock:
+    """Fixture for a mock AST parser."""
+    mock = AsyncMock()
+    mock.parse_file = AsyncMock()
+    mock.extract_functions = AsyncMock()
+    mock.extract_classes = AsyncMock()
+    mock.extract_imports = AsyncMock()
+    return mock
+
+
+@pytest.fixture
+def mock_context_builder() -> AsyncMock:
+    """Fixture for a mock context builder."""
+    mock = AsyncMock()
+    mock.build_context = AsyncMock()
+    return mock
+
+
+@pytest.fixture
+def mock_review_orchestrator() -> AsyncMock:
+    """Fixture for a mock review orchestrator."""
+    mock = AsyncMock()
+    mock.review_pull_request = AsyncMock()
+    mock.review_diff_hunk = AsyncMock()
+    return mock
