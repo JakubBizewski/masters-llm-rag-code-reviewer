@@ -20,6 +20,7 @@ from acr_system.domain.interfaces.ports import (
 )
 from acr_system.domain.value_objects.value_objects import (
     CommentSource,
+    LLMConfig,
     RAGConfig,
     Severity,
 )
@@ -119,7 +120,7 @@ class ReviewOrchestrator:
     
     def __init__(
         self,
-        llm_provider: LLMProvider,
+        llm_factory,  # LLMProviderFactory
         context_builder: ContextBuilder,
         vcs_repository: VCSRepository,
         ast_parser: ASTParser,
@@ -127,7 +128,7 @@ class ReviewOrchestrator:
         call_graph_analyzer: Optional[CallGraphAnalyzer] = None,
         impact_analyzer: Optional[ImpactAnalyzer] = None,
     ):
-        self.llm_provider = llm_provider
+        self.llm_factory = llm_factory
         self.context_builder = context_builder
         self.vcs_repository = vcs_repository
         self.ast_parser = ast_parser
@@ -139,6 +140,7 @@ class ReviewOrchestrator:
         self,
         pr: PullRequest,
         rules_text: str,
+        llm_config: LLMConfig,
         rag_config: Optional[RAGConfig] = None,
     ) -> List[ReviewComment]:
         """Review a pull request and generate comments.
@@ -146,12 +148,16 @@ class ReviewOrchestrator:
         Args:
             pr: Pull request to review
             rules_text: Rules to apply for review
+            llm_config: LLM configuration for this review
             rag_config: RAG configuration
             
         Returns:
             List of review comments
         """
         all_comments: List[ReviewComment] = []
+        
+        # Get LLM provider from factory
+        llm_provider = self.llm_factory.create_provider(llm_config)
         
         # Fetch CI results if analyzer available
         ci_issues: List[ParsedCIIssue] = []
@@ -163,7 +169,7 @@ class ReviewOrchestrator:
             
             # Parse CI results with LLM
             for ci_result in ci_results:
-                parsed = await self.llm_provider.parse_ci_output(
+                parsed = await llm_provider.parse_ci_output(
                     ci_result=ci_result,
                     changed_files=pr.changed_files,
                 )
@@ -186,7 +192,7 @@ class ReviewOrchestrator:
             ]
             
             # Generate review comments with LLM
-            comments = await self.llm_provider.generate_review_comments(
+            comments = await llm_provider.generate_review_comments(
                 diff_hunk=hunk,
                 rules_text=rules_text,
                 context=context,
@@ -304,6 +310,7 @@ class ReviewOrchestrator:
         hunk: DiffHunk,
         pr: PullRequest,
         rules_text: str,
+        llm_config: LLMConfig,
         ci_issues: List[ParsedCIIssue],
         rag_config: Optional[RAGConfig] = None,
     ) -> List[ReviewComment]:
@@ -311,6 +318,9 @@ class ReviewOrchestrator:
         
         This method allows more granular control over the review process.
         """
+        # Get LLM provider from factory
+        llm_provider = self.llm_factory.create_provider(llm_config)
+        
         # Build context
         context = await self.context_builder.build_context(
             diff_hunk=hunk,
@@ -319,7 +329,7 @@ class ReviewOrchestrator:
         )
         
         # Generate comments
-        comments = await self.llm_provider.generate_review_comments(
+        comments = await llm_provider.generate_review_comments(
             diff_hunk=hunk,
             rules_text=rules_text,
             context=context,

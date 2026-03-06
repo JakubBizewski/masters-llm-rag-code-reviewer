@@ -22,11 +22,11 @@ class ProjectConfig:
     rag_config: RAGConfig = field(default_factory=RAGConfig)
     impact_analysis_config: ImpactAnalysisConfig = field(default_factory=ImpactAnalysisConfig)
     
-    def get_rules_for_file(self, file_path: str) -> Tuple[str, Optional[RAGConfig]]:
-        """Get applicable rules and RAG config for a file.
+    def get_rules_for_file(self, file_path: str) -> Tuple[str, Optional[RAGConfig], LLMConfig]:
+        """Get applicable rules, RAG config, and LLM config for a file.
         
         Returns:
-            Tuple of (rules_text, rag_config)
+            Tuple of (rules_text, rag_config, llm_config)
         """
         import fnmatch
         
@@ -43,8 +43,9 @@ class ProjectConfig:
         ]
         matching_patterns.sort(key=lambda p: p.priority, reverse=True)
         
-        # Add file-specific rules
+        # Add file-specific rules and collect config overrides
         rag_config_override: Optional[RAGConfig] = None
+        llm_config_override: Optional[LLMConfig] = None
         
         for pattern in matching_patterns:
             rules_parts.append(f"## File-specific: {pattern.pattern}\n{pattern.rules_text}")
@@ -52,10 +53,15 @@ class ProjectConfig:
             # Use highest priority pattern's RAG config if available
             if pattern.rag_config and not rag_config_override:
                 rag_config_override = pattern.rag_config
+            
+            # Use highest priority pattern's LLM config if available
+            if pattern.llm_config and not llm_config_override:
+                llm_config_override = pattern.llm_config
         
         rules_text = "\n\n".join(rules_parts)
         
-        # Use pattern-specific RAG config or fall back to global
+        # Use pattern-specific configs or fall back to global
         final_rag_config = rag_config_override or self.rag_config
+        final_llm_config = llm_config_override or self.llm_config
         
-        return rules_text, final_rag_config
+        return rules_text, final_rag_config, final_llm_config

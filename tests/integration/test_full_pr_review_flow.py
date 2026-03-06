@@ -144,13 +144,15 @@ async def test_full_pr_review_flow_end_to_end(
             return (
                 "Security rules: No hardcoded secrets, proper JWT validation",
                 RAGConfig(enabled=True, top_k=5),
+                LLMConfig(),
             )
         elif "routes" in file_path:
             return (
                 "API rules: Proper error handling, input validation",
                 RAGConfig(enabled=True, top_k=3),
+                LLMConfig(),
             )
-        return (config.global_rules[0].rules_text, None)
+        return (config.global_rules[0].rules_text, None, LLMConfig())
     
     mock_config_repository.get_rules_for_file.side_effect = get_rules_for_file
     
@@ -279,7 +281,6 @@ async def test_full_pr_review_flow_end_to_end(
     # === Execute use case ===
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
-        llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
         context_builder=mock_context_builder,
@@ -393,7 +394,7 @@ async def test_full_pr_review_flow_with_large_pr_chunking(
     )
     
     mock_config_repository.load_config.return_value = config
-    mock_config_repository.get_rules_for_file.return_value = ("Check quality", None)
+    mock_config_repository.get_rules_for_file.return_value = ("Check quality", None, LLMConfig())
     
     # Mock LLM to return 1 comment per hunk
     mock_llm_provider.generate_review_comments.return_value = [
@@ -421,7 +422,6 @@ async def test_full_pr_review_flow_with_large_pr_chunking(
     # === Execute ===
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
-        llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
         context_builder=mock_context_builder,
@@ -465,7 +465,6 @@ async def test_full_pr_review_flow_with_error_handling(
     
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
-        llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
         context_builder=mock_context_builder,
@@ -526,7 +525,6 @@ async def test_full_pr_review_flow_with_no_changes(
     # === Execute ===
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
-        llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
         context_builder=mock_context_builder,

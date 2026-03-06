@@ -10,6 +10,7 @@ from acr_system.domain.value_objects.value_objects import (
     CommentSource,
     FilePath,
     Language,
+    LLMConfig,
     RAGConfig,
     Severity,
 )
@@ -26,6 +27,8 @@ def mock_llm_provider():
     mock.generate_review_comments = AsyncMock(return_value=[])
     mock.parse_ci_output = AsyncMock(return_value=[])
     mock.generate_completion = AsyncMock()
+    # Act as factory for tests (returns self)
+    mock.create_provider = MagicMock(return_value=mock)
     return mock
 
 
@@ -81,7 +84,7 @@ def review_orchestrator(
 ):
     """Review orchestrator with impact analysis enabled."""
     return ReviewOrchestrator(
-        llm_provider=mock_llm_provider,
+        llm_factory=mock_llm_provider,  # In tests, we can pass mock directly
         context_builder=mock_context_builder,
         vcs_repository=mock_vcs_repository,
         ast_parser=mock_ast_parser,
@@ -185,6 +188,7 @@ class TestImpactAnalysisIntegration:
         comments = await review_orchestrator.review_pull_request(
             pr=sample_pr_with_breaking_change,
             rules_text="Check for breaking changes",
+            llm_config=LLMConfig(),
             rag_config=RAGConfig(enabled=False),
         )
         
@@ -212,7 +216,7 @@ class TestImpactAnalysisIntegration:
         """Test that impact analysis is skipped when analyzers not injected."""
         # Create orchestrator WITHOUT impact analyzers
         orchestrator = ReviewOrchestrator(
-            llm_provider=mock_llm_provider,
+            llm_factory=mock_llm_provider,
             context_builder=mock_context_builder,
             vcs_repository=mock_vcs_repository,
             ast_parser=mock_ast_parser,
@@ -224,6 +228,7 @@ class TestImpactAnalysisIntegration:
         comments = await orchestrator.review_pull_request(
             pr=sample_pr_with_breaking_change,
             rules_text="Check for issues",
+            llm_config=LLMConfig(),
             rag_config=RAGConfig(enabled=False),
         )
         
@@ -259,6 +264,7 @@ class TestImpactAnalysisIntegration:
             comments = await review_orchestrator.review_pull_request(
                 pr=sample_pr_with_breaking_change,
                 rules_text="Check for issues",
+                llm_config=LLMConfig(),
                 rag_config=RAGConfig(enabled=False),
             )
         
@@ -342,6 +348,7 @@ class TestImpactAnalysisIntegration:
         comments = await review_orchestrator.review_pull_request(
             pr=sample_pr_with_breaking_change,
             rules_text="Check for issues",
+            llm_config=LLMConfig(),
             rag_config=RAGConfig(enabled=False),
         )
         
@@ -389,6 +396,7 @@ class TestImpactAnalysisIntegration:
                         comments = await review_orchestrator.review_pull_request(
                             pr=sample_pr_with_breaking_change,
                             rules_text="Check for issues",
+                            llm_config=LLMConfig(),
                             rag_config=RAGConfig(enabled=False),
                         )
         
@@ -538,6 +546,7 @@ class TestImpactAnalysisIntegration:
         comments = await review_orchestrator.review_pull_request(
             pr=sample_pr_with_breaking_change,
             rules_text="Check for issues",
+            llm_config=LLMConfig(),
             rag_config=RAGConfig(enabled=False),
         )
         

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from acr_system.application.dto.dto import PRReviewRequest
 from acr_system.application.use_cases.process_pull_request import ProcessPullRequestUseCase
 from acr_system.domain.entities.entities import DiffHunk, ParsedCIIssue, PullRequest, ReviewComment
-from acr_system.domain.value_objects.value_objects import FilePath, Severity, RuleSet
+from acr_system.domain.value_objects.value_objects import FilePath, LLMConfig, Severity, RuleSet
 from acr_system.infrastructure.config.project_config import ProjectConfig
 
 
@@ -65,7 +65,7 @@ async def test_external_api_github_vcs_integration(
         global_rules=[RuleSet(name="quality", enabled=True, rules_text="Check quality")]
     )
     mock_config_repository.load_config.return_value = config
-    mock_config_repository.get_rules_for_file.return_value = ("Check quality", None)
+    mock_config_repository.get_rules_for_file.return_value = ("Check quality", None, LLMConfig())
     
     # === Mock LLM ===
     mock_llm_provider.generate_review_comments.return_value = [
@@ -94,7 +94,6 @@ async def test_external_api_github_vcs_integration(
     # === Execute ===
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs,
-        llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
         context_builder=mock_context_builder,
@@ -162,7 +161,7 @@ async def test_external_api_openai_llm_integration(
         global_rules=[RuleSet(name="security", enabled=True, rules_text="Security checks")],
     )
     mock_config_repository.load_config.return_value = config
-    mock_config_repository.get_rules_for_file.return_value = ("Security checks", None)
+    mock_config_repository.get_rules_for_file.return_value = ("Security checks", None, LLMConfig())
     
     # === Mock OpenAI LLM responses ===
     mock_llm = AsyncMock()
@@ -203,7 +202,6 @@ async def test_external_api_openai_llm_integration(
     # === Execute ===
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
-        llm_provider=mock_llm,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
         context_builder=mock_context_builder,
@@ -279,6 +277,7 @@ async def test_external_api_faiss_embedding_store_integration(
     mock_config_repository.get_rules_for_file.return_value = (
         "ML best practices",
         RAGConfig(enabled=True, top_k=5),
+        LLMConfig(),
     )
     
     # === Mock FAISS embedding store ===
@@ -328,7 +327,6 @@ async def test_external_api_faiss_embedding_store_integration(
     # === Execute ===
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
-        llm_provider=mock_llm_provider,
         embedding_store=mock_embedding,
         config_repository=mock_config_repository,
         context_builder=mock_context_builder,
@@ -396,7 +394,7 @@ async def test_external_api_github_checks_ci_integration(
         global_rules=[RuleSet(name="quality", enabled=True, rules_text="Code quality")]
     )
     mock_config_repository.load_config.return_value = config
-    mock_config_repository.get_rules_for_file.return_value = ("Code quality", None)
+    mock_config_repository.get_rules_for_file.return_value = ("Code quality", None, LLMConfig())
     
     # === Mock GitHub Checks CI adapter ===
     mock_ci = AsyncMock()
@@ -462,7 +460,6 @@ src/api.py:25:5: E501 Line too long (90 > 88 characters)
     # === Execute ===
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
-        llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
         context_builder=mock_context_builder,
@@ -531,6 +528,7 @@ async def test_external_api_all_services_integration(
     mock_config_repository.get_rules_for_file.return_value = (
         "All rules",
         RAGConfig(enabled=True, top_k=2),
+        LLMConfig(),
     )
     
     # 3. Embeddings (FAISS)
@@ -601,7 +599,6 @@ async def test_external_api_all_services_integration(
     # === Execute ===
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
-        llm_provider=mock_llm,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
         context_builder=mock_context_builder,
