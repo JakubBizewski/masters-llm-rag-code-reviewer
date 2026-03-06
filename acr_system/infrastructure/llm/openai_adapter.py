@@ -183,9 +183,29 @@ Focus on: correctness, security, performance, maintainability, and adherence to 
                     Severity.INFO
                 )
                 
+                # Convert line number: LLM often returns relative line numbers (1, 2, 3...)
+                # within the diff, but GitHub needs absolute line numbers from the file
+                raw_line = comment_data.get("line")
+                if raw_line is not None:
+                    # If line number is small (< new_start_line), treat as relative to hunk
+                    if raw_line < diff_hunk.new_start_line:
+                        absolute_line = diff_hunk.new_start_line + raw_line - 1
+                    else:
+                        absolute_line = raw_line
+                    
+                    # Validate line is within hunk range, otherwise make it a general comment
+                    if not diff_hunk.is_line_in_hunk(absolute_line):
+                        logger.warning(
+                            f"Line {raw_line} (absolute: {absolute_line}) outside hunk range "
+                            f"{diff_hunk.new_start_line}-{diff_hunk.new_start_line + diff_hunk.new_line_count - 1}"
+                        )
+                        absolute_line = None
+                else:
+                    absolute_line = None
+                
                 comment = ReviewComment(
                     file_path=diff_hunk.file_path,
-                    line_number=comment_data.get("line"),
+                    line_number=absolute_line,
                     severity=Severity(level=severity),
                     message=comment_data["message"],
                     suggestion=comment_data.get("suggestion"),

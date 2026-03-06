@@ -49,6 +49,7 @@ class GitHubAdapter(VCSRepository):
                 author=data["user"]["login"],
                 source_branch=data["head"]["ref"],
                 target_branch=data["base"]["ref"],
+                head_sha=data["head"]["sha"],  # Store HEAD commit SHA
             )
             
             return pr
@@ -136,11 +137,17 @@ class GitHubAdapter(VCSRepository):
         try:
             headers = await self.auth.get_auth_headers(repo=repo)
             
+            # Fetch PR to get head SHA
+            pr = await self.get_pull_request(repo, pr_number)
+            if not pr.head_sha:
+                raise VCSAPIError("Cannot post comment: PR head SHA not available")
+            
             url = f"{self.API_BASE}/repos/{repo}/pulls/{pr_number}/comments"
             
             payload = {
                 "body": comment.message,
                 "path": comment.file_path.value,
+                "commit_id": pr.head_sha,
             }
             
             if comment.line_number:
@@ -160,8 +167,56 @@ class GitHubAdapter(VCSRepository):
         comments: list[ReviewComment],
     ) -> None:
         """Post multiple review comments to the PR."""
+        if not comments:
+            return
+        
+        # Fetch PR once to get head SHA
+        pr = await self.get_pull_request(repo, pr_number)
+        if not pr.head_sha:
+            raise VCSAPIError("Cannot post comments: PR head SHA not available")
+        
+        # Post all comments with the same commit_id
+        headers = await self.auth.get_auth_headers(repo=repo)
+        
         for comment in comments:
-            await self.post_review_comment(repo, pr_number, comment)
+            try:
+                if comment.line_number:
+                    # Post as review comment (line-specific)
+                    url = f"{self.API_BASE}/repos/{repo}/pulls/{pr_number}/comments"
+                    payload = {
+                        "body": comment.message,
+                        "path": comment.file_path.value,
+                        "commit_id": pr.head_sha,
+                        "line": comment.line_number,
+                        "side": "RIGHT",
+                    }
+                else:
+                    # Post as issue comment (general)
+                    url = f"{self.API_BASE}/repos/{repo}/issues/{pr_number}/comments"
+                    payload = {
+                        "body": f"**{comment.file_path.value}**:\n\n{comment.message}"
+                    }
+                
+                response = await self.client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                
+            except httpx.HTTPStatusError as e:
+                # If line can't be resolved, fallback to general comment
+                if e.response.status_code == 422 and comment.line_number:
+                    logger.warning(
+                        f"Line {comment.line_number} in {comment.file_path.value} "
+                        f"could not be resolved, posting as general comment"
+                    )
+                    url = f"{self.API_BASE}/repos/{repo}/issues/{pr_number}/comments"
+                    payload = {
+                        "body": f"**{comment.file_path.value}** (line {comment.line_number}):\n\n{comment.message}"
+                    }
+                    response = await self.client.post(url, json=payload, headers=headers)
+                    response.raise_for_status()
+                else:
+                    raise VCSAPIError(f"Error posting comment to GitHub: {e}") from e
+            except httpx.HTTPError as e:
+                raise VCSAPIError(f"Error posting comments to GitHub: {e}") from e
     
     async def get_file_content(
         self,

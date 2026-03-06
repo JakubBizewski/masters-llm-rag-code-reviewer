@@ -99,7 +99,7 @@ class ProcessPullRequestUseCase:
             logger.info(f"Generated {len(all_comments)} review comments")
             
             # 4. Index this review for future RAG
-            await self.embedding_store.index_review_history(pr)
+            # await self.embedding_store.index_review_history(pr)
             
             return ReviewResult(
                 repository=request.repository,

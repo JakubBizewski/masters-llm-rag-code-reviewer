@@ -171,6 +171,7 @@ class PullRequest:
     author: str
     source_branch: str
     target_branch: str
+    head_sha: Optional[str] = None  # HEAD commit SHA for posting comments
     id: UUID = field(default_factory=uuid4)
     diff_hunks: List[DiffHunk] = field(default_factory=list)
     ci_results: List[CIToolResult] = field(default_factory=list)
