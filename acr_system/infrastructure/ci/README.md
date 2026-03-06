@@ -31,10 +31,16 @@ GitHubChecksAdapter → CIToolResult (raw output)
 ## Użycie
 
 ```python
+from acr_system.infrastructure.auth.github_jwt import GitHubAppAuth
 from acr_system.infrastructure.ci.github_checks_adapter import GitHubChecksAdapter
 
-# Inicjalizacja
-adapter = GitHubChecksAdapter(token="ghp_your_token")
+# Inicjalizacja z GitHub App authentication
+auth = GitHubAppAuth(
+    app_id="123456",
+    private_key_path="./github-app-private-key.pem",
+    installation_id="12345678",  # Optional
+)
+adapter = GitHubChecksAdapter(auth=auth)
 
 # Pobranie wyników CI dla PR
 results = await adapter.fetch_ci_results(

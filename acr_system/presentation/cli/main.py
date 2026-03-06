@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from acr_system.application.dto.dto import PRReviewRequest, ReviewPublishRequest
 from acr_system.application.use_cases.process_pull_request import ProcessPullRequestUseCase
 from acr_system.application.use_cases.publish_review import PublishReviewUseCase
+from acr_system.infrastructure.auth.github_jwt import GitHubAppAuth
 from acr_system.infrastructure.ci.github_checks_adapter import GitHubChecksAdapter
 from acr_system.infrastructure.config.yaml_config_loader import YAMLConfigLoader
 from acr_system.infrastructure.llm.openai_adapter import OpenAIAdapter
@@ -59,13 +60,21 @@ async def _review_async(
         repo, pr_number = _parse_pr_url(pr_url)
         click.echo(f"Reviewing PR #{pr_number} in {repo}")
         
-        # Initialize adapters
-        github_token = os.getenv("GITHUB_TOKEN")
-        if not github_token:
-            click.echo("Error: GITHUB_TOKEN not set in environment", err=True)
+        # Initialize GitHub App authentication
+        app_id = os.getenv("GITHUB_APP_ID")
+        private_key_path = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH")
+        installation_id = os.getenv("GITHUB_APP_INSTALLATION_ID")
+        
+        if not app_id or not private_key_path:
+            click.echo("Error: GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH must be set", err=True)
             return
         
-        vcs_adapter = GitHubAdapter(token=github_token)
+        auth = GitHubAppAuth(
+            app_id=app_id,
+            private_key_path=private_key_path,
+            installation_id=installation_id,
+        )
+        vcs_adapter = GitHubAdapter(auth=auth)
         
         # Initialize LLM provider
         if provider == "openai":
@@ -88,7 +97,7 @@ async def _review_async(
         config_loader = YAMLConfigLoader(vcs_repository=vcs_adapter)
         
         # Initialize CI analyzer
-        ci_analyzer = GitHubChecksAdapter(token=github_token)
+        ci_analyzer = GitHubChecksAdapter(auth=auth)
         
         # Create use case
         process_pr = ProcessPullRequestUseCase(

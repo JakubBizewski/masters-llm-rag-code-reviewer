@@ -7,6 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from acr_system.application.dto.dto import PRReviewRequest, ReviewPublishRequest
 from acr_system.application.use_cases.process_pull_request import ProcessPullRequestUseCase
 from acr_system.application.use_cases.publish_review import PublishReviewUseCase
+from acr_system.infrastructure.auth.github_jwt import GitHubAppAuth
 from acr_system.infrastructure.ci.github_checks_adapter import GitHubChecksAdapter
 from acr_system.infrastructure.config.yaml_config_loader import YAMLConfigLoader
 from acr_system.infrastructure.llm.openai_adapter import OpenAIAdapter
@@ -24,14 +25,21 @@ async def process_pr_review_task(repo: str, pr_number: int) -> None:
         logger.info(f"Starting background review for PR #{pr_number} in {repo}")
         
         # Initialize services
-        github_token = os.getenv("GITHUB_TOKEN")
+        app_id = os.getenv("GITHUB_APP_ID")
+        private_key_path = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH")
+        installation_id = os.getenv("GITHUB_APP_INSTALLATION_ID")
         openai_key = os.getenv("OPENAI_API_KEY")
         
-        if not github_token or not openai_key:
-            logger.error("Missing required API keys")
+        if not app_id or not private_key_path or not openai_key:
+            logger.error("Missing required API keys/credentials")
             return
         
-        vcs_adapter = GitHubAdapter(token=github_token)
+        auth = GitHubAppAuth(
+            app_id=app_id,
+            private_key_path=private_key_path,
+            installation_id=installation_id,
+        )
+        vcs_adapter = GitHubAdapter(auth=auth)
         llm_adapter = OpenAIAdapter(
             api_key=openai_key,
             model=os.getenv("DEFAULT_LLM_MODEL", "gpt-4o")
@@ -45,7 +53,7 @@ async def process_pr_review_task(repo: str, pr_number: int) -> None:
         config_loader = YAMLConfigLoader(vcs_repository=vcs_adapter)
         
         # Initialize CI analyzer
-        ci_analyzer = GitHubChecksAdapter(token=github_token)
+        ci_analyzer = GitHubChecksAdapter(auth=auth)
         
         # Process review
         process_pr = ProcessPullRequestUseCase(
