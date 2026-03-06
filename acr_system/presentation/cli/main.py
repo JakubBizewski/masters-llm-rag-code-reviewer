@@ -34,19 +34,13 @@ def cli(log_level: str) -> None:
 
 @cli.command()
 @click.option("--pr-url", required=True, help="Pull request URL (e.g., https://github.com/owner/repo/pull/123)")
-@click.option("--config", help="Path to .acr-config.yml (optional, will fetch from repo)")
 @click.option("--publish/--no-publish", default=False, help="Publish comments to PR")
-@click.option("--provider", default="openai", help="LLM provider (openai, anthropic)")
-@click.option("--model", help="LLM model to use")
 def review(
     pr_url: str,
-    config: Optional[str],
-    publish: bool,
-    provider: str,
-    model: Optional[str],
+    publish: bool
 ) -> None:
     """Review a pull request."""
-    asyncio.run(_review_async(pr_url, config, publish, provider, model))
+    asyncio.run(_review_async(pr_url, publish))
 
 
 async def _review_async(

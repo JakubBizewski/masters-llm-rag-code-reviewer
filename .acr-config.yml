@@ -51,11 +51,6 @@ file_patterns:
       - Use context managers (with statement) for resource management
       - Prefer pathlib over os.path for file operations
       - Use f-strings for string formatting
-    llm_config:
-      provider: "openai"
-      model: "gpt-4o"
-      temperature: 0.3
-      max_tokens: 2000
     rag_config:
       enabled: true
       top_k: 5
