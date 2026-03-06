@@ -150,8 +150,8 @@ class FilePatternRule:
 class LLMConfig:
     """LLM configuration (global or per file pattern)."""
     
-    provider: str = "openai"  # openai | anthropic | custom
-    model: str = "gpt-4o"
+    provider: str = "anthropic"  # openai | anthropic | custom
+    model: str = "claude-haiku-4-5"  # e.g., gpt-4o, claude-2, or custom model name
     temperature: float = 0.3
     max_tokens: int = 2000
     
