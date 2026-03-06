@@ -142,6 +142,8 @@ async def _review_async(
                     f"{comment.file_path} ({line_info}): {comment.message[:80]}..."
                 )
         
+        DUPA
+
         # Publish if requested
         if publish:
             click.echo("\nPublishing comments to PR...")
