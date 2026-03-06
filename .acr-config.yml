@@ -1,0 +1,138 @@
+# ACR System Configuration Example
+# Place this file (.acr-config.yml) in the root of your repository
+
+review:
+  enabled: true
+
+# Global rules applied to all files
+global_rules:
+  - name: "security"
+    enabled: true
+    rules_text: |
+      Security Review Guidelines:
+      - Check for SQL injection vulnerabilities (use parameterized queries)
+      - Check for XSS vulnerabilities (sanitize HTML output)
+      - Validate and sanitize all user inputs
+      - Check for hardcoded secrets or credentials
+      - Ensure proper authentication and authorization
+      - Check for insecure cryptographic practices
+      
+  - name: "code_quality"
+    enabled: true
+    rules_text: |
+      Code Quality Guidelines:
+      - Check for code duplication (DRY principle)
+      - Ensure proper error handling (don't swallow exceptions)
+      - Check for dead code or unused variables
+      - Verify proper resource cleanup (close files, connections)
+      - Check for magic numbers (use named constants)
+      - Ensure functions have single responsibility
+      
+  - name: "performance"
+    enabled: true
+    rules_text: |
+      Performance Review Guidelines:
+      - Check for N+1 queries in database operations
+      - Verify efficient data structures are used
+      - Check for unnecessary loops or iterations
+      - Ensure proper indexing for database queries
+      - Check for memory leaks or excessive memory usage
+
+# File-specific rules (using glob patterns)
+file_patterns:
+  # Python files
+  - pattern: "**/*.py"
+    priority: 10
+    rules_text: |
+      Python Best Practices:
+      - Follow PEP 8 style guide
+      - Use type hints for function parameters and return types
+      - Add docstrings to all public functions and classes
+      - Use context managers (with statement) for resource management
+      - Prefer pathlib over os.path for file operations
+      - Use f-strings for string formatting
+    rag_config:
+      enabled: true
+      top_k: 5
+      documentation_paths:
+        - "docs/"
+        - "README.md"
+  
+  # JavaScript/TypeScript files
+  - pattern: "**/*.{js,ts}"
+    priority: 10
+    rules_text: |
+      JavaScript/TypeScript Best Practices:
+      - Use const for variables that don't change
+      - Prefer async/await over callbacks
+      - Use strict equality (===) instead of loose equality (==)
+      - Add TypeScript types for all functions (if .ts)
+      - Avoid using 'any' type in TypeScript
+      - Use arrow functions for callbacks
+      - Handle promise rejections properly
+  
+  # Test files
+  - pattern: "**/*.test.{py,js,ts}"
+    priority: 20  # Higher priority overrides generic rules
+    rules_text: |
+      Test Code Guidelines:
+      - Each test should test one thing
+      - Use descriptive test names
+      - Follow AAA pattern (Arrange, Act, Assert)
+      - Don't test implementation details
+      - Use appropriate assertions
+      - Clean up test data after tests
+    llm_config:
+      temperature: 0.2  # Lower temperature for more consistent test reviews
+  
+  # Configuration files
+  - pattern: "**/*.{yml,yaml,json,toml}"
+    priority: 5
+    rules_text: |
+      Configuration File Guidelines:
+      - No secrets or credentials in config files
+      - Use environment variables for sensitive data
+      - Add comments explaining complex configurations
+      - Validate JSON/YAML syntax
+  
+  # Database migration files
+  - pattern: "**/migrations/*.py"
+    priority: 15
+    rules_text: |
+      Database Migration Guidelines:
+      - Always include both upgrade and downgrade paths
+      - Test migrations on a copy of production data
+      - Check for breaking changes
+      - Verify indexes are created for foreign keys
+      - Consider performance impact on large tables
+
+# Global LLM configuration (can be overridden per file pattern)
+llm:
+  provider: "anthropic"  # openai | anthropic
+  model: "claude-haiku-4-5"     # gpt-4o | gpt-4 | claude-3-opus | claude-3-sonnet
+  temperature: 0.3    # 0.0-2.0 (lower = more deterministic)
+  max_tokens: 2000    # Maximum tokens in response
+
+# Global RAG (Retrieval-Augmented Generation) configuration
+rag:
+  enabled: true
+  top_k: 5  # Number of similar documents to retrieve
+  documentation_paths:
+    - "docs/"
+    - "README.md"
+    - "CONTRIBUTING.md"
+  architectural_docs:
+    - "architektura-systemu.md"
+
+# Impact Analysis configuration (Breaking Changes Detection)
+impact_analysis:
+  enabled: true
+  max_callers_per_function: 10  # Limit callers analyzed per function (performance)
+  depth: 1  # Only analyze direct callers (not recursive call chains)
+  analyze_imports: true  # Also analyze import dependencies
+  severity_threshold: "medium"  # Only create comments for >= medium severity
+  exclude_patterns:
+    - "tests/**"  # Don't analyze test files
+    - "**/*.test.py"
+    - "**/*.test.js"
+    - "**/migrations/**"  # Skip database migrations

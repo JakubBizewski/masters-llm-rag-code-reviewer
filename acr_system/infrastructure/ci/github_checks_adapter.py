@@ -5,6 +5,7 @@ import httpx
 
 from acr_system.domain.entities.entities import CIToolResult
 from acr_system.domain.interfaces.ports import StaticAnalyzer
+from acr_system.infrastructure.auth.github_jwt import GitHubAppAuth
 from acr_system.shared.exceptions.infrastructure_exceptions import CIFetchError
 from acr_system.shared.logging.logger import get_logger
 
@@ -12,25 +13,18 @@ logger = get_logger(__name__)
 
 
 class GitHubChecksAdapter(StaticAnalyzer):
-    """Adapter for GitHub Checks API to fetch CI/CD results."""
+    """Adapter for GitHub Checks API with GitHub App authentication."""
     
     API_BASE = "https://api.github.com"
     
-    def __init__(self, token: str):
+    def __init__(self, auth: GitHubAppAuth):
         """Initialize GitHub Checks adapter.
         
         Args:
-            token: GitHub API token with repo access
+            auth: GitHubAppAuth instance for authentication
         """
-        self.token = token
-        self.client = httpx.AsyncClient(
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            timeout=30.0,
-        )
+        self.auth = auth
+        self.client = httpx.AsyncClient(timeout=30.0)
     
     async def fetch_ci_results(
         self,
@@ -50,9 +44,11 @@ class GitHubChecksAdapter(StaticAnalyzer):
             CIFetchError: If fetching CI results fails
         """
         try:
+            headers = await self.auth.get_auth_headers(repo=repo)
+            
             # First, get the PR to find the head commit SHA
             pr_url = f"{self.API_BASE}/repos/{repo}/pulls/{pr_number}"
-            pr_response = await self.client.get(pr_url)
+            pr_response = await self.client.get(pr_url, headers=headers)
             pr_response.raise_for_status()
             pr_data = pr_response.json()
             
@@ -85,8 +81,10 @@ class GitHubChecksAdapter(StaticAnalyzer):
             CIFetchError: If fetching check runs fails
         """
         try:
+            headers = await self.auth.get_auth_headers(repo=repo)
+            
             url = f"{self.API_BASE}/repos/{repo}/commits/{commit_sha}/check-runs"
-            response = await self.client.get(url)
+            response = await self.client.get(url, headers=headers)
             response.raise_for_status()
             
             data = response.json()
@@ -201,8 +199,10 @@ class GitHubChecksAdapter(StaticAnalyzer):
             return []
         
         try:
+            headers = await self.auth.get_auth_headers(repo=repo)
+            
             url = f"{self.API_BASE}/repos/{repo}/check-runs/{check_run_id}/annotations"
-            response = await self.client.get(url)
+            response = await self.client.get(url, headers=headers)
             
             # Annotations endpoint might not be available for all check runs
             if response.status_code == 404:

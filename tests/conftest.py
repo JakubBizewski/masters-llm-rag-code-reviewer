@@ -1,6 +1,6 @@
 """Pytest configuration and fixtures."""
 import pytest
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 from acr_system.domain.entities.entities import DiffHunk, PullRequest
 from acr_system.domain.value_objects.value_objects import FilePath
@@ -57,6 +57,8 @@ def mock_llm_provider() -> AsyncMock:
     mock.generate_review_comments = AsyncMock()
     mock.parse_ci_output = AsyncMock()
     mock.generate_completion = AsyncMock()
+    # Also act as factory for tests (returns self)
+    mock.create_provider = MagicMock(return_value=mock)
     return mock
 
 

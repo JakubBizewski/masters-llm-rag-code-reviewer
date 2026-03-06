@@ -70,3 +70,5 @@ embeddings_cache/
 tmp/
 temp/
 *.tmp
+
+*.pem

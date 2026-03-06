@@ -22,14 +22,12 @@ class ProcessPullRequestUseCase:
     def __init__(
         self,
         vcs_repository: VCSRepository,
-        llm_provider: LLMProvider,
         embedding_store: EmbeddingStore,
         config_repository: ConfigRepository,
         context_builder: ContextBuilder,
         review_orchestrator: ReviewOrchestrator,
     ):
         self.vcs_repository = vcs_repository
-        self.llm_provider = llm_provider
         self.embedding_store = embedding_store
         self.config_repository = config_repository
         self.context_builder = context_builder
@@ -77,8 +75,8 @@ class ProcessPullRequestUseCase:
             for file_path in pr.changed_files:
                 logger.info(f"Reviewing file: {file_path}")
                 
-                # Get rules for this file
-                rules_text, rag_config = await self.config_repository.get_rules_for_file(
+                # Get rules, RAG config, and LLM config for this file
+                rules_text, rag_config, llm_config = await self.config_repository.get_rules_for_file(
                     config=config,
                     file_path=file_path,
                 )
@@ -92,6 +90,7 @@ class ProcessPullRequestUseCase:
                         hunk=hunk,
                         pr=pr,
                         rules_text=rules_text,
+                        llm_config=llm_config,
                         ci_issues=[],  # CI issues handled by orchestrator
                         rag_config=rag_config,
                     )

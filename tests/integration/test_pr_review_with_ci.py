@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from acr_system.application.dto.dto import PRReviewRequest
 from acr_system.application.use_cases.process_pull_request import ProcessPullRequestUseCase
 from acr_system.domain.entities.entities import DiffHunk, PullRequest
-from acr_system.domain.value_objects.value_objects import FilePath
+from acr_system.domain.value_objects.value_objects import FilePath, LLMConfig
 from acr_system.infrastructure.ci.github_checks_adapter import GitHubChecksAdapter
 
 
@@ -63,6 +63,7 @@ async def test_process_pr_with_ci_checks(
     mock_config_repository.get_rules_for_file.return_value = (
         "Check for quality issues",
         None,
+        LLMConfig(),
     )
     
     # Mock LLM responses
@@ -120,7 +121,6 @@ async def test_process_pr_with_ci_checks(
     # Create use case with CI adapter
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
-        llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
         context_builder=mock_context_builder,
@@ -181,7 +181,7 @@ async def test_process_pr_without_ci_checks(
         global_rules=[RuleSet(name="quality", enabled=True, rules_text="Check quality")]
     )
     mock_config_repository.load_config.return_value = config
-    mock_config_repository.get_rules_for_file.return_value = ("Check quality", None)
+    mock_config_repository.get_rules_for_file.return_value = ("Check quality", None, LLMConfig())
     
     from acr_system.domain.entities.entities import ReviewComment
     from acr_system.domain.value_objects.value_objects import Severity
@@ -211,7 +211,6 @@ async def test_process_pr_without_ci_checks(
     # Create use case (CI is now handled inside ReviewOrchestrator)
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
-        llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
         context_builder=mock_context_builder,
@@ -288,7 +287,7 @@ async def test_ci_parsing_multiple_tools(
         global_rules=[RuleSet(name="quality", enabled=True, rules_text="Quality checks")]
     )
     mock_config_repository.load_config.return_value = config
-    mock_config_repository.get_rules_for_file.return_value = ("Quality checks", None)
+    mock_config_repository.get_rules_for_file.return_value = ("Quality checks", None, LLMConfig())
     
     # === Mock CI with multiple tools ===
     mock_ci = AsyncMock()
@@ -389,7 +388,6 @@ async def test_ci_parsing_multiple_tools(
     # === Execute ===
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
-        llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
         context_builder=mock_context_builder,
@@ -463,7 +461,7 @@ async def test_ci_parsing_with_no_issues(
         global_rules=[RuleSet(name="quality", enabled=True, rules_text="Quality")]
     )
     mock_config_repository.load_config.return_value = config
-    mock_config_repository.get_rules_for_file.return_value = ("Quality", None)
+    mock_config_repository.get_rules_for_file.return_value = ("Quality", None, LLMConfig())
     
     # === Mock CI with all passing checks ===
     mock_ci = AsyncMock()
@@ -518,7 +516,6 @@ async def test_ci_parsing_with_no_issues(
     # === Execute ===
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
-        llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
         context_builder=mock_context_builder,
@@ -594,7 +591,7 @@ async def test_ci_parsing_with_partial_failures(
         global_rules=[RuleSet(name="all", enabled=True, rules_text="All checks")]
     )
     mock_config_repository.load_config.return_value = config
-    mock_config_repository.get_rules_for_file.return_value = ("All checks", None)
+    mock_config_repository.get_rules_for_file.return_value = ("All checks", None, LLMConfig())
     
     # === Mock CI with mixed results ===
     mock_ci = AsyncMock()
@@ -673,7 +670,6 @@ async def test_ci_parsing_with_partial_failures(
     # === Execute ===
     use_case = ProcessPullRequestUseCase(
         vcs_repository=mock_vcs_repository,
-        llm_provider=mock_llm_provider,
         embedding_store=mock_embedding_store,
         config_repository=mock_config_repository,
         context_builder=mock_context_builder,

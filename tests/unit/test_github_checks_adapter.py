@@ -2,14 +2,27 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from acr_system.infrastructure.auth.github_jwt import GitHubAppAuth
 from acr_system.infrastructure.ci.github_checks_adapter import GitHubChecksAdapter
 from acr_system.shared.exceptions.infrastructure_exceptions import CIFetchError
 
 
 @pytest.fixture
-def github_checks_adapter():
+def mock_auth():
+    """Fixture for mock GitHubAppAuth."""
+    auth = MagicMock(spec=GitHubAppAuth)
+    auth.get_auth_headers = AsyncMock(return_value={
+        "Authorization": "Bearer test-token",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    })
+    return auth
+
+
+@pytest.fixture
+def github_checks_adapter(mock_auth):
     """Fixture for GitHubChecksAdapter."""
-    return GitHubChecksAdapter(token="test-token")
+    return GitHubChecksAdapter(auth=mock_auth)
 
 
 @pytest.fixture

@@ -150,6 +150,6 @@ class YAMLConfigLoader(ConfigRepository):
         self,
         config: ProjectConfig,
         file_path: str,
-    ) -> Tuple[str, Optional[RAGConfig]]:
-        """Get applicable rules and RAG config for a file."""
+    ) -> Tuple[str, Optional[RAGConfig], LLMConfig]:
+        """Get applicable rules, RAG config, and LLM config for a file."""
         return config.get_rules_for_file(file_path)

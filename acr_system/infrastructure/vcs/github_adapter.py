@@ -7,6 +7,7 @@ import httpx
 from acr_system.domain.entities.entities import DiffHunk, PullRequest, ReviewComment
 from acr_system.domain.interfaces.ports import VCSRepository
 from acr_system.domain.value_objects.value_objects import FilePath
+from acr_system.infrastructure.auth.github_jwt import GitHubAppAuth
 from acr_system.shared.exceptions.infrastructure_exceptions import VCSAPIError
 from acr_system.shared.logging.logger import get_logger
 
@@ -14,26 +15,27 @@ logger = get_logger(__name__)
 
 
 class GitHubAdapter(VCSRepository):
-    """Adapter for GitHub REST API."""
+    """Adapter for GitHub REST API with GitHub App authentication."""
     
     API_BASE = "https://api.github.com"
     
-    def __init__(self, token: str):
-        self.token = token
-        self.client = httpx.AsyncClient(
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            timeout=30.0,
-        )
+    def __init__(self, auth: GitHubAppAuth):
+        """Initialize GitHub adapter.
+        
+        Args:
+            auth: GitHubAppAuth instance for authentication
+        """
+        self.auth = auth
+        self.client = httpx.AsyncClient(timeout=30.0)
     
     async def get_pull_request(self, repo: str, pr_number: int) -> PullRequest:
         """Fetch pull request details."""
         try:
+            # Get auth headers (with auto-refresh)
+            headers = await self.auth.get_auth_headers(repo=repo)
+            
             url = f"{self.API_BASE}/repos/{repo}/pulls/{pr_number}"
-            response = await self.client.get(url)
+            response = await self.client.get(url, headers=headers)
             response.raise_for_status()
             
             data = response.json()
@@ -57,8 +59,10 @@ class GitHubAdapter(VCSRepository):
     async def get_diff_hunks(self, repo: str, pr_number: int) -> list[DiffHunk]:
         """Fetch diff hunks for a PR."""
         try:
+            headers = await self.auth.get_auth_headers(repo=repo)
+            
             url = f"{self.API_BASE}/repos/{repo}/pulls/{pr_number}/files"
-            response = await self.client.get(url)
+            response = await self.client.get(url, headers=headers)
             response.raise_for_status()
             
             files = response.json()
@@ -130,6 +134,8 @@ class GitHubAdapter(VCSRepository):
     ) -> None:
         """Post a review comment to the PR."""
         try:
+            headers = await self.auth.get_auth_headers(repo=repo)
+            
             url = f"{self.API_BASE}/repos/{repo}/pulls/{pr_number}/comments"
             
             payload = {
@@ -141,7 +147,7 @@ class GitHubAdapter(VCSRepository):
                 payload["line"] = comment.line_number
                 payload["side"] = "RIGHT"  # Comment on new version
             
-            response = await self.client.post(url, json=payload)
+            response = await self.client.post(url, json=payload, headers=headers)
             response.raise_for_status()
             
         except httpx.HTTPError as e:
@@ -165,10 +171,12 @@ class GitHubAdapter(VCSRepository):
     ) -> str:
         """Get file content at a specific ref."""
         try:
+            headers = await self.auth.get_auth_headers(repo=repo)
+            
             url = f"{self.API_BASE}/repos/{repo}/contents/{file_path}"
             params = {"ref": ref}
             
-            response = await self.client.get(url, params=params)
+            response = await self.client.get(url, params=params, headers=headers)
             response.raise_for_status()
             
             data = response.json()

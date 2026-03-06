@@ -9,9 +9,12 @@ from dotenv import load_dotenv
 from acr_system.application.dto.dto import PRReviewRequest, ReviewPublishRequest
 from acr_system.application.use_cases.process_pull_request import ProcessPullRequestUseCase
 from acr_system.application.use_cases.publish_review import PublishReviewUseCase
+from acr_system.ast.tree_sitter_adapter import TreeSitterAdapter
+from acr_system.domain.services.services import ContextBuilder, ReviewOrchestrator
+from acr_system.infrastructure.auth.github_jwt import GitHubAppAuth
 from acr_system.infrastructure.ci.github_checks_adapter import GitHubChecksAdapter
 from acr_system.infrastructure.config.yaml_config_loader import YAMLConfigLoader
-from acr_system.infrastructure.llm.openai_adapter import OpenAIAdapter
+from acr_system.infrastructure.llm.llm_factory import LLMProviderFactory
 from acr_system.infrastructure.rag.faiss_store import FAISSStore
 from acr_system.infrastructure.vcs.github_adapter import GitHubAdapter
 from acr_system.shared.logging.logger import configure_logging, get_logger
@@ -31,27 +34,18 @@ def cli(log_level: str) -> None:
 
 @cli.command()
 @click.option("--pr-url", required=True, help="Pull request URL (e.g., https://github.com/owner/repo/pull/123)")
-@click.option("--config", help="Path to .acr-config.yml (optional, will fetch from repo)")
 @click.option("--publish/--no-publish", default=False, help="Publish comments to PR")
-@click.option("--provider", default="openai", help="LLM provider (openai, anthropic)")
-@click.option("--model", help="LLM model to use")
 def review(
     pr_url: str,
-    config: Optional[str],
-    publish: bool,
-    provider: str,
-    model: Optional[str],
+    publish: bool
 ) -> None:
     """Review a pull request."""
-    asyncio.run(_review_async(pr_url, config, publish, provider, model))
+    asyncio.run(_review_async(pr_url, publish))
 
 
 async def _review_async(
     pr_url: str,
-    config_path: Optional[str],
-    publish: bool,
-    provider: str,
-    model: Optional[str],
+    publish: bool
 ) -> None:
     """Async implementation of review command."""
     try:
@@ -59,26 +53,28 @@ async def _review_async(
         repo, pr_number = _parse_pr_url(pr_url)
         click.echo(f"Reviewing PR #{pr_number} in {repo}")
         
-        # Initialize adapters
-        github_token = os.getenv("GITHUB_TOKEN")
-        if not github_token:
-            click.echo("Error: GITHUB_TOKEN not set in environment", err=True)
+        # Initialize GitHub App authentication
+        app_id = os.getenv("GITHUB_APP_ID")
+        private_key_path = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH")
+        installation_id = os.getenv("GITHUB_APP_INSTALLATION_ID")
+        
+        if not app_id or not private_key_path:
+            click.echo("Error: GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH must be set", err=True)
             return
         
-        vcs_adapter = GitHubAdapter(token=github_token)
+        auth = GitHubAppAuth(
+            app_id=app_id,
+            private_key_path=private_key_path,
+            installation_id=installation_id,
+        )
+        vcs_adapter = GitHubAdapter(auth=auth)
         
-        # Initialize LLM provider
-        if provider == "openai":
-            api_key = os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                click.echo("Error: OPENAI_API_KEY not set in environment", err=True)
-                return
-            
-            llm_model = model or os.getenv("DEFAULT_LLM_MODEL", "gpt-4o")
-            llm_adapter = OpenAIAdapter(api_key=api_key, model=llm_model)
-        else:
-            click.echo(f"Error: Provider '{provider}' not implemented yet", err=True)
-            return
+        # Initialize LLM provider factory
+        # Note: --provider and --model flags are deprecated, use .acr-config.yml instead
+        llm_factory = LLMProviderFactory(
+            openai_api_key=os.getenv("OPENAI_API_KEY"),
+            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
+        )
         
         # Initialize RAG store
         embedding_model = os.getenv("RAG_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
@@ -88,15 +84,32 @@ async def _review_async(
         config_loader = YAMLConfigLoader(vcs_repository=vcs_adapter)
         
         # Initialize CI analyzer
-        ci_analyzer = GitHubChecksAdapter(token=github_token)
+        ci_analyzer = GitHubChecksAdapter(auth=auth)
+        
+        # Initialize AST parser
+        ast_parser = TreeSitterAdapter()
+        
+        # Create domain services
+        context_builder = ContextBuilder(
+            embedding_store=rag_store,
+            vcs_repository=vcs_adapter,
+        )
+        
+        review_orchestrator = ReviewOrchestrator(
+            llm_factory=llm_factory,
+            context_builder=context_builder,
+            vcs_repository=vcs_adapter,
+            ast_parser=ast_parser,
+            static_analyzer=ci_analyzer,
+        )
         
         # Create use case
         process_pr = ProcessPullRequestUseCase(
             vcs_repository=vcs_adapter,
-            llm_provider=llm_adapter,
             embedding_store=rag_store,
             config_repository=config_loader,
-            static_analyzer=ci_analyzer,
+            context_builder=context_builder,
+            review_orchestrator=review_orchestrator,
         )
         
         # Execute review

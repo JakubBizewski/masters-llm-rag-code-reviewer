@@ -33,14 +33,47 @@ pip install -e ".[all]"
 
 ## Konfiguracja
 
-1. Skopiuj `.env.example` do `.env`:
+### 1. GitHub App Authentication
+
+System używa GitHub App do autoryzacji. Postępuj zgodnie z [instrukcją konfiguracji](acr_system/infrastructure/auth/README.md):
+
+1. Utwórz GitHub App w ustawieniach organizacji/konta
+2. Wygeneruj i pobierz klucz prywatny (.pem)
+3. Zainstaluj aplikację w swoich repozytoriach
+4. Skonfiguruj zmienne środowiskowe:
+
 ```bash
-cp .env.example .env
+# .env
+GITHUB_APP_ID=123456
+GITHUB_APP_PRIVATE_KEY_PATH=./github-app-private-key.pem
+GITHUB_APP_INSTALLATION_ID=12345678  # Optional, auto-detect
 ```
 
-2. Uzupełnij klucze API w `.env`
+### 2. LLM Provider (OpenAI lub Anthropic)
 
-3. Utwórz konfigurację projektu `.acr-config.yml` w swoim repozytorium:
+Wybierz jednego z dostawców LLM:
+
+**Option A: OpenAI (GPT-4, GPT-4o)**
+```bash
+# .env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+DEFAULT_LLM_MODEL=gpt-4o
+```
+
+**Option B: Anthropic (Claude)**
+```bash
+# .env
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+DEFAULT_LLM_MODEL=claude-3-5-sonnet-20241022
+```
+
+### 3. Konfiguracja projektu
+
+Skopiuj `.env.example` do `.env` i uzupełnij wartości.
+
+Utwórz konfigurację `.acr-config.yml` w swoim repozytorium:
 ```yaml
 review:
   enabled: true
@@ -93,8 +126,14 @@ rag:
 ### CLI
 
 ```bash
-# Review pojedynczego Pull Requesta
+# Review pojedynczego Pull Requesta (domyślnie z OpenAI)
 acr review --pr-url https://github.com/owner/repo/pull/123
+
+# Użycie Anthropic Claude
+acr review --pr-url https://github.com/owner/repo/pull/123 --provider anthropic
+
+# Użycie konkretnego modelu
+acr review --pr-url https://github.com/owner/repo/pull/123 --provider anthropic --model claude-3-opus-20240229
 
 # Uruchomienie z lokalną konfiguracją
 acr review --pr-url https://github.com/owner/repo/pull/123 --config .acr-config.yml

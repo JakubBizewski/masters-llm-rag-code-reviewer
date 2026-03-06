@@ -167,11 +167,11 @@ class ConfigRepository(ABC):
         self,
         config: "ProjectConfig",
         file_path: str,
-    ) -> Tuple[str, Optional[RAGConfig]]:
-        """Get applicable rules and RAG config for a file.
+    ) -> Tuple[str, Optional[RAGConfig], "LLMConfig"]:
+        """Get applicable rules, RAG config, and LLM config for a file.
         
         Returns:
-            Tuple of (rules_text, rag_config)
+            Tuple of (rules_text, rag_config, llm_config)
         """
         pass
 
