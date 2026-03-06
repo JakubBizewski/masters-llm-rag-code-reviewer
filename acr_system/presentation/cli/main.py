@@ -14,6 +14,7 @@ from acr_system.domain.services.services import ContextBuilder, ReviewOrchestrat
 from acr_system.infrastructure.auth.github_jwt import GitHubAppAuth
 from acr_system.infrastructure.ci.github_checks_adapter import GitHubChecksAdapter
 from acr_system.infrastructure.config.yaml_config_loader import YAMLConfigLoader
+from acr_system.infrastructure.llm.anthropic_adapter import AnthropicAdapter
 from acr_system.infrastructure.llm.openai_adapter import OpenAIAdapter
 from acr_system.infrastructure.rag.faiss_store import FAISSStore
 from acr_system.infrastructure.vcs.github_adapter import GitHubAdapter
@@ -87,8 +88,16 @@ async def _review_async(
             
             llm_model = model or os.getenv("DEFAULT_LLM_MODEL", "gpt-4o")
             llm_adapter = OpenAIAdapter(api_key=api_key, model=llm_model)
+        elif provider == "anthropic":
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if not api_key:
+                click.echo("Error: ANTHROPIC_API_KEY not set in environment", err=True)
+                return
+            
+            llm_model = model or os.getenv("DEFAULT_LLM_MODEL", "claude-3-5-sonnet-20241022")
+            llm_adapter = AnthropicAdapter(api_key=api_key, model=llm_model)
         else:
-            click.echo(f"Error: Provider '{provider}' not implemented yet", err=True)
+            click.echo(f"Error: Provider '{provider}' not supported. Use 'openai' or 'anthropic'", err=True)
             return
         
         # Initialize RAG store

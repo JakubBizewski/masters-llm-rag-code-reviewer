@@ -21,12 +21,12 @@ Lista zadań do ukończenia, aby system był w 100% gotowy do produkcji.
   - Pobieranie zawartości plików
   - Testy jednostkowe i integracyjne
 
-- [ ] **Anthropic (Claude) Adapter** - `infrastructure/llm/anthropic_adapter.py`
-  - Implementacja `LLMProvider` dla Claude
-  - Generowanie komentarzy review
-  - Parsowanie CI output
-  - Obsługa różnych modeli Claude (opus, sonnet, haiku)
-  - Testy
+- [x] **Anthropic (Claude) Adapter** - `infrastructure/llm/anthropic_adapter.py`
+  - ✅ Implementacja `LLMProvider` dla Claude
+  - ✅ Generowanie komentarzy review
+  - ✅ Parsowanie CI output
+  - ✅ Obsługa różnych modeli Claude (opus, sonnet, haiku)
+  - ✅ Testy jednostkowe (18 tests)
 
 - [x] **GitHub Checks Adapter** - `infrastructure/ci/github_checks_adapter.py`
   - ✅ Implementacja `StaticAnalyzer` dla GitHub Checks API

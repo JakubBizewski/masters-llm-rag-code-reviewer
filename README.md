@@ -49,12 +49,24 @@ GITHUB_APP_PRIVATE_KEY_PATH=./github-app-private-key.pem
 GITHUB_APP_INSTALLATION_ID=12345678  # Optional, auto-detect
 ```
 
-### 2. OpenAI API
+### 2. LLM Provider (OpenAI lub Anthropic)
 
+Wybierz jednego z dostawców LLM:
+
+**Option A: OpenAI (GPT-4, GPT-4o)**
 ```bash
 # .env
+LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-...
 DEFAULT_LLM_MODEL=gpt-4o
+```
+
+**Option B: Anthropic (Claude)**
+```bash
+# .env
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+DEFAULT_LLM_MODEL=claude-3-5-sonnet-20241022
 ```
 
 ### 3. Konfiguracja projektu
@@ -114,8 +126,14 @@ rag:
 ### CLI
 
 ```bash
-# Review pojedynczego Pull Requesta
+# Review pojedynczego Pull Requesta (domyślnie z OpenAI)
 acr review --pr-url https://github.com/owner/repo/pull/123
+
+# Użycie Anthropic Claude
+acr review --pr-url https://github.com/owner/repo/pull/123 --provider anthropic
+
+# Użycie konkretnego modelu
+acr review --pr-url https://github.com/owner/repo/pull/123 --provider anthropic --model claude-3-opus-20240229
 
 # Uruchomienie z lokalną konfiguracją
 acr review --pr-url https://github.com/owner/repo/pull/123 --config .acr-config.yml

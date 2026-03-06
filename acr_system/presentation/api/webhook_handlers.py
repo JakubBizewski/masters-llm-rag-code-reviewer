@@ -12,6 +12,7 @@ from acr_system.domain.services.services import ContextBuilder, ReviewOrchestrat
 from acr_system.infrastructure.auth.github_jwt import GitHubAppAuth
 from acr_system.infrastructure.ci.github_checks_adapter import GitHubChecksAdapter
 from acr_system.infrastructure.config.yaml_config_loader import YAMLConfigLoader
+from acr_system.infrastructure.llm.anthropic_adapter import AnthropicAdapter
 from acr_system.infrastructure.llm.openai_adapter import OpenAIAdapter
 from acr_system.infrastructure.rag.faiss_store import FAISSStore
 from acr_system.infrastructure.vcs.github_adapter import GitHubAdapter
@@ -42,10 +43,27 @@ async def process_pr_review_task(repo: str, pr_number: int) -> None:
             installation_id=installation_id,
         )
         vcs_adapter = GitHubAdapter(auth=auth)
-        llm_adapter = OpenAIAdapter(
-            api_key=openai_key,
-            model=os.getenv("DEFAULT_LLM_MODEL", "gpt-4o")
-        )
+        
+        # Initialize LLM provider
+        llm_provider = os.getenv("LLM_PROVIDER", "openai")
+        
+        if llm_provider == "openai":
+            llm_adapter = OpenAIAdapter(
+                api_key=openai_key,
+                model=os.getenv("DEFAULT_LLM_MODEL", "gpt-4o")
+            )
+        elif llm_provider == "anthropic":
+            anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+            if not anthropic_key:
+                logger.error("Missing ANTHROPIC_API_KEY")
+                return
+            llm_adapter = AnthropicAdapter(
+                api_key=anthropic_key,
+                model=os.getenv("DEFAULT_LLM_MODEL", "claude-3-5-sonnet-20241022")
+            )
+        else:
+            logger.error(f"Unsupported LLM provider: {llm_provider}")
+            return
         rag_store = FAISSStore(
             embedding_model_name=os.getenv(
                 "RAG_EMBEDDING_MODEL",
