@@ -1,6 +1,6 @@
 """GitHub App JWT authentication."""
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -119,7 +119,7 @@ class GitHubAppAuth:
         
         # Check if cached token is still valid
         if self._installation_token and self._token_expires_at:
-            if datetime.now() < self._token_expires_at - timedelta(seconds=self.TOKEN_REFRESH_BUFFER):
+            if datetime.now(timezone.utc) < self._token_expires_at - timedelta(seconds=self.TOKEN_REFRESH_BUFFER):
                 logger.debug("Using cached installation token")
                 return self._installation_token
         
@@ -153,15 +153,36 @@ class GitHubAppAuth:
             except httpx.HTTPError as e:
                 raise VCSAPIError(f"Failed to get installation token: {e}") from e
     
-    async def get_auth_headers(self, installation_id: Optional[str] = None) -> dict:
+    async def get_auth_headers(
+        self,
+        repo: Optional[str] = None,
+        installation_id: Optional[str] = None,
+    ) -> dict:
         """Get authentication headers for API requests.
         
+        If installation_id is not set, will auto-detect it using the repo.
+        
         Args:
+            repo: Repository in format "owner/repo" (for auto-detection)
             installation_id: Installation ID (uses self.installation_id if not provided)
             
         Returns:
             Dict with Authorization header
+            
+        Raises:
+            VCSAPIError: If installation_id cannot be determined
         """
+        # Auto-detect installation_id if not set
+        if not installation_id and not self.installation_id:
+            if repo:
+                logger.info(f"Auto-detecting installation_id for repo {repo}")
+                installation_id = await self.get_installation_id_for_repo(repo)
+            else:
+                raise VCSAPIError(
+                    "Installation ID not provided and no repo specified for auto-detection. "
+                    "Set GITHUB_APP_INSTALLATION_ID or ensure repo is passed to API calls."
+                )
+        
         token = await self.get_installation_token(installation_id)
         return {
             "Authorization": f"Bearer {token}",

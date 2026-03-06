@@ -44,7 +44,7 @@ class GitHubChecksAdapter(StaticAnalyzer):
             CIFetchError: If fetching CI results fails
         """
         try:
-            headers = await self.auth.get_auth_headers()
+            headers = await self.auth.get_auth_headers(repo=repo)
             
             # First, get the PR to find the head commit SHA
             pr_url = f"{self.API_BASE}/repos/{repo}/pulls/{pr_number}"
@@ -81,7 +81,7 @@ class GitHubChecksAdapter(StaticAnalyzer):
             CIFetchError: If fetching check runs fails
         """
         try:
-            headers = await self.auth.get_auth_headers()
+            headers = await self.auth.get_auth_headers(repo=repo)
             
             url = f"{self.API_BASE}/repos/{repo}/commits/{commit_sha}/check-runs"
             response = await self.client.get(url, headers=headers)
@@ -199,7 +199,7 @@ class GitHubChecksAdapter(StaticAnalyzer):
             return []
         
         try:
-            headers = await self.auth.get_auth_headers()
+            headers = await self.auth.get_auth_headers(repo=repo)
             
             url = f"{self.API_BASE}/repos/{repo}/check-runs/{check_run_id}/annotations"
             response = await self.client.get(url, headers=headers)

@@ -1,6 +1,6 @@
 """Tests for GitHub App JWT authentication."""
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -110,7 +110,7 @@ class TestGitHubAppAuth:
         """Test that cached token is reused."""
         # Set cached token
         github_app_auth._installation_token = "cached-token"
-        github_app_auth._token_expires_at = datetime.now() + timedelta(hours=1)
+        github_app_auth._token_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
         
         # Should return cached token without API call
         token = await github_app_auth.get_installation_token()
@@ -122,12 +122,12 @@ class TestGitHubAppAuth:
         """Test that expired token is refreshed."""
         # Set expired token
         github_app_auth._installation_token = "expired-token"
-        github_app_auth._token_expires_at = datetime.now() - timedelta(minutes=1)
+        github_app_auth._token_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
         
         mock_response = MagicMock()
         mock_response.json.return_value = {
             "token": "ghs_new_token",
-            "expires_at": (datetime.now() + timedelta(hours=1)).isoformat() + "Z",
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
         }
         mock_response.raise_for_status = MagicMock()
         
@@ -171,7 +171,7 @@ class TestGitHubAppAuth:
     async def test_get_auth_headers(self, github_app_auth):
         """Test getting auth headers."""
         github_app_auth._installation_token = "test-token"
-        github_app_auth._token_expires_at = datetime.now() + timedelta(hours=1)
+        github_app_auth._token_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
         
         headers = await github_app_auth.get_auth_headers()
         

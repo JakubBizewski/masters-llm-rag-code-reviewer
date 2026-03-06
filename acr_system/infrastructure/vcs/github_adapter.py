@@ -32,7 +32,7 @@ class GitHubAdapter(VCSRepository):
         """Fetch pull request details."""
         try:
             # Get auth headers (with auto-refresh)
-            headers = await self.auth.get_auth_headers()
+            headers = await self.auth.get_auth_headers(repo=repo)
             
             url = f"{self.API_BASE}/repos/{repo}/pulls/{pr_number}"
             response = await self.client.get(url, headers=headers)
@@ -59,7 +59,7 @@ class GitHubAdapter(VCSRepository):
     async def get_diff_hunks(self, repo: str, pr_number: int) -> list[DiffHunk]:
         """Fetch diff hunks for a PR."""
         try:
-            headers = await self.auth.get_auth_headers()
+            headers = await self.auth.get_auth_headers(repo=repo)
             
             url = f"{self.API_BASE}/repos/{repo}/pulls/{pr_number}/files"
             response = await self.client.get(url, headers=headers)
@@ -134,7 +134,7 @@ class GitHubAdapter(VCSRepository):
     ) -> None:
         """Post a review comment to the PR."""
         try:
-            headers = await self.auth.get_auth_headers()
+            headers = await self.auth.get_auth_headers(repo=repo)
             
             url = f"{self.API_BASE}/repos/{repo}/pulls/{pr_number}/comments"
             
@@ -171,7 +171,7 @@ class GitHubAdapter(VCSRepository):
     ) -> str:
         """Get file content at a specific ref."""
         try:
-            headers = await self.auth.get_auth_headers()
+            headers = await self.auth.get_auth_headers(repo=repo)
             
             url = f"{self.API_BASE}/repos/{repo}/contents/{file_path}"
             params = {"ref": ref}

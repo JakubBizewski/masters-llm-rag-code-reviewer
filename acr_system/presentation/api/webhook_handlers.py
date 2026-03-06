@@ -7,6 +7,8 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from acr_system.application.dto.dto import PRReviewRequest, ReviewPublishRequest
 from acr_system.application.use_cases.process_pull_request import ProcessPullRequestUseCase
 from acr_system.application.use_cases.publish_review import PublishReviewUseCase
+from acr_system.ast.tree_sitter_adapter import TreeSitterAdapter
+from acr_system.domain.services.services import ContextBuilder, ReviewOrchestrator
 from acr_system.infrastructure.auth.github_jwt import GitHubAppAuth
 from acr_system.infrastructure.ci.github_checks_adapter import GitHubChecksAdapter
 from acr_system.infrastructure.config.yaml_config_loader import YAMLConfigLoader
@@ -55,13 +57,31 @@ async def process_pr_review_task(repo: str, pr_number: int) -> None:
         # Initialize CI analyzer
         ci_analyzer = GitHubChecksAdapter(auth=auth)
         
+        # Initialize AST parser
+        ast_parser = TreeSitterAdapter()
+        
+        # Create domain services
+        context_builder = ContextBuilder(
+            embedding_store=rag_store,
+            vcs_repository=vcs_adapter,
+        )
+        
+        review_orchestrator = ReviewOrchestrator(
+            llm_provider=llm_adapter,
+            context_builder=context_builder,
+            vcs_repository=vcs_adapter,
+            ast_parser=ast_parser,
+            static_analyzer=ci_analyzer,
+        )
+        
         # Process review
         process_pr = ProcessPullRequestUseCase(
             vcs_repository=vcs_adapter,
             llm_provider=llm_adapter,
             embedding_store=rag_store,
             config_repository=config_loader,
-            static_analyzer=ci_analyzer,
+            context_builder=context_builder,
+            review_orchestrator=review_orchestrator,
         )
         
         request = PRReviewRequest(repository=repo, pr_number=pr_number)
