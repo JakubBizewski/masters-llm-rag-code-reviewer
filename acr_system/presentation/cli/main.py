@@ -51,10 +51,7 @@ def review(
 
 async def _review_async(
     pr_url: str,
-    config_path: Optional[str],
-    publish: bool,
-    provider: str,
-    model: Optional[str],
+    publish: bool
 ) -> None:
     """Async implementation of review command."""
     try:
