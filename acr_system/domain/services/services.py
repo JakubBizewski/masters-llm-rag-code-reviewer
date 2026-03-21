@@ -1,4 +1,5 @@
 """Domain services for orchestrating code review."""
+import asyncio
 from typing import List, Optional
 
 from acr_system.ast.parser import ASTParser
@@ -175,8 +176,9 @@ class ReviewOrchestrator:
                 )
                 ci_issues.extend(parsed)
         
-        # Review each diff hunk
-        for hunk in pr.diff_hunks:
+        # Review each diff hunk in parallel
+        async def review_single_hunk(hunk: DiffHunk) -> List[ReviewComment]:
+            """Review a single diff hunk - helper for parallel processing."""
             # Build context for this hunk
             context = await self.context_builder.build_context(
                 diff_hunk=hunk,
@@ -199,7 +201,19 @@ class ReviewOrchestrator:
                 ci_issues=relevant_ci_issues,
             )
             
-            all_comments.extend(comments)
+            return comments
+        
+        # Process all hunks in parallel using asyncio.gather
+        hunk_review_tasks = [review_single_hunk(hunk) for hunk in pr.diff_hunks]
+        hunk_comments_lists = await asyncio.gather(*hunk_review_tasks, return_exceptions=True)
+        
+        # Flatten results and handle exceptions
+        for result in hunk_comments_lists:
+            if isinstance(result, Exception):
+                # Log exception but continue with other hunks
+                # TODO: Add proper logging
+                continue
+            all_comments.extend(result)
         
         # Step 4b-4d: Impact Analysis (breaking changes detection)
         if self.call_graph_analyzer and self.impact_analyzer:
@@ -253,55 +267,76 @@ class ReviewOrchestrator:
         """
         impact_comments: List[ReviewComment] = []
         
-        # Extract changed functions from all diff hunks
+        # Helper function to analyze a single function in parallel
+        async def analyze_single_function(func: FunctionNode, hunk: DiffHunk) -> List[ReviewComment]:
+            """Analyze impact of a single changed function - helper for parallel processing."""
+            try:
+                # Step 4b: Find callers of this function
+                callers = await self.call_graph_analyzer.find_callers(
+                    function_name=func.name,
+                    file_path=func.file_path,
+                    language=func.language,
+                    repo_path=pr.repository,
+                )
+                
+                # Skip if no callers found (not used elsewhere)
+                if not callers:
+                    return []
+                
+                # Step 4c: Analyze impact with LLM
+                impact_result = await self.impact_analyzer.analyze_impact(
+                    changed_function=func,
+                    diff_hunk=hunk,
+                    callers=callers,
+                    repository=pr.repository,
+                )
+                
+                # Step 4d: Create warning comments for breaking changes
+                comments = []
+                if impact_result.breaking_changes:
+                    for breaking_change in impact_result.breaking_changes:
+                        # Only create comments for medium+ severity
+                        if breaking_change.severity.priority >= Severity(level=Severity.WARNING).priority:
+                            comment = ReviewComment(
+                                file_path=func.file_path,
+                                line_number=func.start_line,
+                                severity=breaking_change.severity,
+                                message=f"⚠️ Potential Breaking Change in `{func.name}()`:\n\n"
+                                        f"{breaking_change.issue}\n\n"
+                                        f"**Affected callers:** {len(callers)}\n"
+                                        f"**Impact:** {impact_result.summary}",
+                                suggestion=breaking_change.suggested_fix,
+                                rule_name="impact_analysis",
+                                source=CommentSource(source=CommentSource.IMPACT_ANALYSIS),
+                            )
+                            comments.append(comment)
+                
+                return comments
+            
+            except Exception:
+                # Continue with other functions if one fails
+                return []
+        
+        # Extract changed functions from all diff hunks and collect analysis tasks
+        analysis_tasks = []
         for hunk in pr.diff_hunks:
             changed_functions = await self._extract_changed_functions(hunk, pr)
             
-            # Analyze each changed function
+            # Create tasks for all functions in this hunk
             for func in changed_functions:
-                try:
-                    # Step 4b: Find callers of this function
-                    callers = await self.call_graph_analyzer.find_callers(
-                        function_name=func.name,
-                        file_path=func.file_path,
-                        language=func.language,
-                        repo_path=pr.repository,
-                    )
-                    
-                    # Skip if no callers found (not used elsewhere)
-                    if not callers:
-                        continue
-                    
-                    # Step 4c: Analyze impact with LLM
-                    impact_result = await self.impact_analyzer.analyze_impact(
-                        changed_function=func,
-                        diff_hunk=hunk,
-                        callers=callers,
-                        repository=pr.repository,
-                    )
-                    
-                    # Step 4d: Create warning comments for breaking changes
-                    if impact_result.breaking_changes:
-                        for breaking_change in impact_result.breaking_changes:
-                            # Only create comments for medium+ severity
-                            if breaking_change.severity.priority >= Severity(level=Severity.WARNING).priority:
-                                comment = ReviewComment(
-                                    file_path=func.file_path,
-                                    line_number=func.start_line,
-                                    severity=breaking_change.severity,
-                                    message=f"⚠️ Potential Breaking Change in `{func.name}()`:\n\n"
-                                            f"{breaking_change.issue}\n\n"
-                                            f"**Affected callers:** {len(callers)}\n"
-                                            f"**Impact:** {impact_result.summary}",
-                                    suggestion=breaking_change.suggested_fix,
-                                    rule_name="impact_analysis",
-                                    source=CommentSource(source=CommentSource.IMPACT_ANALYSIS),
-                                )
-                                impact_comments.append(comment)
-                
-                except Exception:
-                    # Continue with other functions if one fails
+                analysis_tasks.append(analyze_single_function(func, hunk))
+        
+        # Process all functions in parallel using asyncio.gather
+        if analysis_tasks:
+            function_comments_lists = await asyncio.gather(*analysis_tasks, return_exceptions=True)
+            
+            # Flatten results and handle exceptions
+            for result in function_comments_lists:
+                if isinstance(result, Exception):
+                    # Log exception but continue with other functions
+                    # TODO: Add proper logging
                     continue
+                impact_comments.extend(result)
         
         return impact_comments
     

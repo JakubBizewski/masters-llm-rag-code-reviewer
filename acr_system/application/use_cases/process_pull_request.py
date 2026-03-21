@@ -1,4 +1,5 @@
 """Use case: Process Pull Request for code review."""
+import asyncio
 from typing import Optional
 
 from acr_system.application.dto.dto import PRReviewRequest, ReviewResult
@@ -6,8 +7,6 @@ from acr_system.ast.parser import ASTParser
 from acr_system.domain.interfaces.ports import (
     ConfigRepository,
     EmbeddingStore,
-    LLMProvider,
-    StaticAnalyzer,
     VCSRepository,
 )
 from acr_system.domain.services.services import ContextBuilder, ReviewOrchestrator
@@ -72,7 +71,9 @@ class ProcessPullRequestUseCase:
             # 3. Review each file with appropriate rules
             all_comments = []
             
-            for file_path in pr.changed_files:
+            # Helper function to review a single file with all its hunks in parallel
+            async def review_single_file(file_path: str):
+                """Review a single file - helper for parallel processing."""
                 logger.info(f"Reviewing file: {file_path}")
                 
                 # Get rules, RAG config, and LLM config for this file
@@ -84,9 +85,10 @@ class ProcessPullRequestUseCase:
                 # Get hunks for this file
                 file_hunks = pr.get_hunks_for_file(file_path)
                 
-                # Review with orchestrator
-                for hunk in file_hunks:
-                    comments = await self.review_orchestrator.review_diff_hunk(
+                # Helper function to review a single hunk
+                async def review_single_hunk(hunk):
+                    """Review a single hunk - nested helper for parallel processing."""
+                    return await self.review_orchestrator.review_diff_hunk(
                         hunk=hunk,
                         pr=pr,
                         rules_text=rules_text,
@@ -94,7 +96,31 @@ class ProcessPullRequestUseCase:
                         ci_issues=[],  # CI issues handled by orchestrator
                         rag_config=rag_config,
                     )
-                    all_comments.extend(comments)
+                
+                # Process all hunks in this file in parallel
+                hunk_tasks = [review_single_hunk(hunk) for hunk in file_hunks]
+                hunk_comments_lists = await asyncio.gather(*hunk_tasks, return_exceptions=True)
+                
+                # Flatten results and handle exceptions
+                file_comments = []
+                for result in hunk_comments_lists:
+                    if isinstance(result, Exception):
+                        logger.error(f"Error reviewing hunk in {file_path}: {result}")
+                        continue
+                    file_comments.extend(result)
+                
+                return file_comments
+            
+            # Process all files in parallel
+            file_tasks = [review_single_file(file_path) for file_path in pr.changed_files]
+            file_comments_lists = await asyncio.gather(*file_tasks, return_exceptions=True)
+            
+            # Flatten results and handle exceptions
+            for result in file_comments_lists:
+                if isinstance(result, Exception):
+                    logger.error(f"Error reviewing file: {result}")
+                    continue
+                all_comments.extend(result)
             
             logger.info(f"Generated {len(all_comments)} review comments")
             
