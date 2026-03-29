@@ -99,7 +99,7 @@ class TestOpenAIAdapterCIParsing:
         with patch.object(
             openai_adapter.client.chat.completions,
             'create',
-            return_value=mock_response,
+            new=AsyncMock(return_value=mock_response),
         ) as mock_create:
             changed_files = {"src/main.py", "src/utils.py"}
             
@@ -157,7 +157,7 @@ class TestOpenAIAdapterCIParsing:
         with patch.object(
             openai_adapter.client.chat.completions,
             'create',
-            return_value=mock_response,
+            new=AsyncMock(return_value=mock_response),
         ):
             changed_files = {"src/main.py", "src/config.py"}
             
@@ -199,7 +199,7 @@ class TestOpenAIAdapterCIParsing:
         with patch.object(
             openai_adapter.client.chat.completions,
             'create',
-            return_value=mock_response,
+            new=AsyncMock(return_value=mock_response),
         ):
             # Only one file changed
             changed_files = {"src/main.py"}
@@ -239,7 +239,7 @@ class TestOpenAIAdapterCIParsing:
         with patch.object(
             openai_adapter.client.chat.completions,
             'create',
-            return_value=mock_response,
+            new=AsyncMock(return_value=mock_response),
         ):
             changed_files = {"src/app.js"}
             
@@ -293,7 +293,7 @@ Required minimum: 80%""",
         with patch.object(
             openai_adapter.client.chat.completions,
             'create',
-            return_value=mock_response,
+            new=AsyncMock(return_value=mock_response),
         ):
             changed_files = {"src/handlers/auth.py"}
             
@@ -312,7 +312,7 @@ Required minimum: 80%""",
         with patch.object(
             openai_adapter.client.chat.completions,
             'create',
-            side_effect=Exception("API error"),
+            new=AsyncMock(side_effect=Exception("API error")),
         ):
             changed_files = {"src/main.py"}
             
@@ -339,7 +339,7 @@ Required minimum: 80%""",
         with patch.object(
             openai_adapter.client.chat.completions,
             'create',
-            return_value=mock_response,
+            new=AsyncMock(return_value=mock_response),
         ):
             changed_files = {"src/main.py"}
             

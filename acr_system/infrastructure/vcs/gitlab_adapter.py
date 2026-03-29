@@ -9,7 +9,7 @@ Notes:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import quote_plus, quote
 from uuid import uuid4
@@ -71,6 +71,8 @@ class GitLabAdapter(VCSRepository):
             source_branch = data.get("source_branch") or ""
             target_branch = data.get("target_branch") or ""
 
+            created_at = _parse_gitlab_datetime(data.get("created_at"))
+
             # GitLab provides diff refs with head SHA
             diff_refs = data.get("diff_refs") or {}
             head_sha = diff_refs.get("head_sha") or data.get("sha")
@@ -85,6 +87,7 @@ class GitLabAdapter(VCSRepository):
                 source_branch=source_branch,
                 target_branch=target_branch,
                 head_sha=head_sha,
+                created_at=created_at or datetime.now(timezone.utc),
             )
 
         except httpx.HTTPError as e:
@@ -281,7 +284,7 @@ class GitLabAdapter(VCSRepository):
                         root_id = int(note_id)
 
                     author = (n.get("author") or {}).get("username") or (n.get("author") or {}).get("name") or "unknown"
-                    created_at = _parse_gitlab_datetime(n.get("created_at")) or datetime.utcnow()
+                    created_at = _parse_gitlab_datetime(n.get("created_at")) or datetime.now(timezone.utc)
 
                     file_path = None
                     line_number = None

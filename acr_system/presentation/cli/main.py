@@ -10,6 +10,10 @@ from dotenv import load_dotenv
 from acr_system.application.dto.dto import PRReviewRequest, ReviewPublishRequest
 from acr_system.application.dto.dto import PRHistoryIndexRequest
 from acr_system.application.use_cases.index_pr_history import IndexPRHistoryUseCase
+from acr_system.application.use_cases.evaluate_pull_request import (
+    EvaluatePullRequestUseCase,
+    EvaluationRequest,
+)
 from acr_system.application.use_cases.process_pull_request import ProcessPullRequestUseCase
 from acr_system.application.use_cases.publish_review import PublishReviewUseCase
 from acr_system.ast.tree_sitter_adapter import TreeSitterAdapter
@@ -18,10 +22,13 @@ from acr_system.infrastructure.auth.github_jwt import GitHubAppAuth
 from acr_system.infrastructure.ci.github_checks_adapter import GitHubChecksAdapter
 from acr_system.infrastructure.ci.gitlab_ci_adapter import GitLabCIAdapter
 from acr_system.infrastructure.config.yaml_config_loader import YAMLConfigLoader
+from acr_system.infrastructure.config.file_yaml_config_loader import FileYAMLConfigLoader
 from acr_system.infrastructure.llm.llm_factory import LLMProviderFactory
 from acr_system.infrastructure.rag.faiss_store import FAISSStore
 from acr_system.infrastructure.vcs import GitHubAdapter, GitLabAdapter
 from acr_system.shared.logging.logger import configure_logging, get_logger
+from acr_system.shared.utils.token_counter import UsageStats
+from acr_system.experimental.reporting import write_json_report
 
 # Load environment variables
 load_dotenv()
@@ -60,6 +67,17 @@ def review(
 def index_history(repo: str, max_prs: int, provider: str) -> None:
     """Index historical merged PR changes (diff + comments) for a repository."""
     asyncio.run(_index_history_async(repo, max_prs, provider.lower()))
+
+
+@cli.command("evaluate")
+@click.option("--pr-url", required=True, help="PR/MR URL (GitHub/GitLab)")
+@click.option("--config-path", required=True, type=click.Path(exists=True, dir_okay=False), help="Path to YAML config file")
+@click.option("--report-path", default="./acr_eval_report.json", show_default=True, help="Where to write JSON report")
+@click.option("--history-window-days", default=365, show_default=True, type=int, help="Index only PRs up to N days older than target")
+@click.option("--max-history-prs", default=200, show_default=True, type=int, help="Max merged PRs to consider for history indexing")
+def evaluate(pr_url: str, config_path: str, report_path: str, history_window_days: int, max_history_prs: int) -> None:
+    """Experimental evaluation: index PR history, run review, write report."""
+    asyncio.run(_evaluate_async(pr_url, config_path, report_path, history_window_days, max_history_prs))
 
 
 async def _review_async(
@@ -271,6 +289,113 @@ def _create_adapters(provider: str) -> tuple[GitHubAdapter | GitLabAdapter, GitH
         return GitLabAdapter(token=token, api_base=api_base), GitLabCIAdapter(token=token, api_base=api_base)
 
     raise ValueError(f"Unsupported provider: {provider}")
+
+
+async def _evaluate_async(
+    pr_url: str,
+    config_path: str,
+    report_path: str,
+    history_window_days: int,
+    max_history_prs: int,
+) -> None:
+    try:
+        repo, pr_number, provider = _parse_pr_url(pr_url)
+        click.echo(f"Evaluating historical PR #{pr_number} in {repo} ({provider})")
+
+        # Experimental evaluation intentionally skips CI fetching to keep metrics focused
+        # on RAG/indexing + LLM review quality/cost.
+        if provider == "github":
+            gh_token = os.getenv("GITHUB_TOKEN")
+            if gh_token:
+                vcs_adapter = GitHubAdapter(token=gh_token)
+            else:
+                app_id = os.getenv("GITHUB_APP_ID")
+                private_key_path = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH")
+                installation_id = os.getenv("GITHUB_APP_INSTALLATION_ID")
+                if not app_id or not private_key_path:
+                    raise ValueError(
+                        "For GitHub evaluation set either GITHUB_TOKEN or (GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH)"
+                    )
+                auth = GitHubAppAuth(
+                    app_id=app_id,
+                    private_key_path=private_key_path,
+                    installation_id=installation_id,
+                )
+                vcs_adapter = GitHubAdapter(auth=auth)
+        elif provider == "gitlab":
+            token = os.getenv("GITLAB_TOKEN")
+            api_base = os.getenv("GITLAB_API_BASE", "https://gitlab.com/api/v4")
+            if not token:
+                raise ValueError("GITLAB_TOKEN must be set")
+            vcs_adapter = GitLabAdapter(token=token, api_base=api_base)
+        else:
+            raise ValueError(f"Unsupported provider: {provider}")
+
+        # Local config override
+        config_loader = FileYAMLConfigLoader(config_path=config_path)
+
+        # RAG store (persistent)
+        embedding_model = os.getenv("RAG_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+        rag_storage_path = os.getenv("RAG_FAISS_INDEX_PATH", "./faiss_index")
+        rag_store = FAISSStore(
+            embedding_model_name=embedding_model,
+            storage_path=rag_storage_path,
+        )
+
+        # Usage accounting
+        llm_usage = UsageStats()
+
+        llm_factory = LLMProviderFactory(
+            openai_api_key=os.getenv("OPENAI_API_KEY"),
+            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
+            usage_stats=llm_usage,
+        )
+
+        ast_parser = TreeSitterAdapter()
+        context_builder = ContextBuilder(
+            embedding_store=rag_store,
+            vcs_repository=vcs_adapter,
+        )
+        review_orchestrator = ReviewOrchestrator(
+            llm_factory=llm_factory,
+            context_builder=context_builder,
+            vcs_repository=vcs_adapter,
+            ast_parser=ast_parser,
+            static_analyzer=None,
+        )
+
+        process_pr = ProcessPullRequestUseCase(
+            vcs_repository=vcs_adapter,
+            embedding_store=rag_store,
+            config_repository=config_loader,
+            context_builder=context_builder,
+            review_orchestrator=review_orchestrator,
+        )
+
+        evaluator = EvaluatePullRequestUseCase(
+            vcs_repository=vcs_adapter,
+            embedding_store=rag_store,
+            process_pr_use_case=process_pr,
+            llm_usage_stats=llm_usage,
+        )
+
+        result = await evaluator.execute(
+            EvaluationRequest(
+                repository=repo,
+                pr_number=pr_number,
+                history_window_days=history_window_days,
+                max_history_prs=max_history_prs,
+            )
+        )
+
+        write_json_report(report_path, result)
+        click.echo(f"✓ Report written to: {report_path}")
+
+        await vcs_adapter.close()
+
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        logger.error(f"Evaluate failed: {e}", exc_info=True)
 
 
 @cli.command()

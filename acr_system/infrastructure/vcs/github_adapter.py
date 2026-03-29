@@ -1,5 +1,5 @@
 """GitHub adapter for VCS operations."""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
@@ -20,26 +20,39 @@ class GitHubAdapter(VCSRepository):
     
     API_BASE = "https://api.github.com"
     
-    def __init__(self, auth: GitHubAppAuth):
+    def __init__(self, auth: Optional[GitHubAppAuth] = None, token: Optional[str] = None):
         """Initialize GitHub adapter.
-        
+
         Args:
-            auth: GitHubAppAuth instance for authentication
+            auth: GitHubAppAuth instance for authentication (preferred)
+            token: GitHub token for Authorization header (fallback)
         """
         self.auth = auth
+        self.token = token
         self.client = httpx.AsyncClient(timeout=30.0)
+
+    async def _get_headers(self, repo: str) -> dict[str, str]:
+        if self.auth is not None:
+            return await self.auth.get_auth_headers(repo=repo)
+        if self.token:
+            return {
+                "Authorization": f"Bearer {self.token}",
+                "Accept": "application/vnd.github+json",
+            }
+        return {"Accept": "application/vnd.github+json"}
     
     async def get_pull_request(self, repo: str, pr_number: int) -> PullRequest:
         """Fetch pull request details."""
         try:
-            # Get auth headers (with auto-refresh)
-            headers = await self.auth.get_auth_headers(repo=repo)
+            headers = await self._get_headers(repo)
             
             url = f"{self.API_BASE}/repos/{repo}/pulls/{pr_number}"
             response = await self.client.get(url, headers=headers)
             response.raise_for_status()
             
             data = response.json()
+
+            created_at = _parse_github_datetime(data.get("created_at"))
             
             pr = PullRequest(
                 id=uuid4(),
@@ -51,6 +64,7 @@ class GitHubAdapter(VCSRepository):
                 source_branch=data["head"]["ref"],
                 target_branch=data["base"]["ref"],
                 head_sha=data["head"]["sha"],  # Store HEAD commit SHA
+                created_at=created_at or datetime.now(timezone.utc),
             )
             
             return pr
@@ -61,7 +75,7 @@ class GitHubAdapter(VCSRepository):
     async def get_diff_hunks(self, repo: str, pr_number: int) -> list[DiffHunk]:
         """Fetch diff hunks for a PR."""
         try:
-            headers = await self.auth.get_auth_headers(repo=repo)
+            headers = await self._get_headers(repo)
             
             url = f"{self.API_BASE}/repos/{repo}/pulls/{pr_number}/files"
             response = await self.client.get(url, headers=headers)
@@ -136,7 +150,7 @@ class GitHubAdapter(VCSRepository):
     ) -> None:
         """Post a review comment to the PR."""
         try:
-            headers = await self.auth.get_auth_headers(repo=repo)
+            headers = await self._get_headers(repo)
             
             # Fetch PR to get head SHA
             pr = await self.get_pull_request(repo, pr_number)
@@ -177,7 +191,7 @@ class GitHubAdapter(VCSRepository):
             raise VCSAPIError("Cannot post comments: PR head SHA not available")
         
         # Post all comments with the same commit_id
-        headers = await self.auth.get_auth_headers(repo=repo)
+        headers = await self._get_headers(repo)
         
         for comment in comments:
             try:
@@ -227,7 +241,7 @@ class GitHubAdapter(VCSRepository):
     ) -> str:
         """Get file content at a specific ref."""
         try:
-            headers = await self.auth.get_auth_headers(repo=repo)
+            headers = await self._get_headers(repo)
             
             url = f"{self.API_BASE}/repos/{repo}/contents/{file_path}"
             params = {"ref": ref}
@@ -260,7 +274,7 @@ class GitHubAdapter(VCSRepository):
             return []
 
         try:
-            headers = await self.auth.get_auth_headers(repo=repo)
+            headers = await self._get_headers(repo)
             results: list[int] = []
             per_page = 100
             page = 1
@@ -301,7 +315,7 @@ class GitHubAdapter(VCSRepository):
     ) -> list[PullRequestDiscussionComment]:
         """Fetch PR discussion comments (review comments + issue comments)."""
         try:
-            headers = await self.auth.get_auth_headers(repo=repo)
+            headers = await self._get_headers(repo)
             comments: list[PullRequestDiscussionComment] = []
 
             # 1) Review comments (inline PR review threads)
@@ -330,7 +344,7 @@ class GitHubAdapter(VCSRepository):
                             comment_id=int(c["id"]),
                             author=(c.get("user") or {}).get("login") or "unknown",
                             body=body,
-                            created_at=created_at or datetime.utcnow(),
+                            created_at=created_at or datetime.now(timezone.utc),
                             file_path=FilePath(file_path) if file_path else None,
                             line_number=int(line_number) if isinstance(line_number, int) else None,
                             in_reply_to_id=int(in_reply_to_id) if isinstance(in_reply_to_id, int) else None,
@@ -362,7 +376,7 @@ class GitHubAdapter(VCSRepository):
                             comment_id=int(c["id"]),
                             author=(c.get("user") or {}).get("login") or "unknown",
                             body=body,
-                            created_at=created_at or datetime.utcnow(),
+                            created_at=created_at or datetime.now(timezone.utc),
                             file_path=None,
                             line_number=None,
                             in_reply_to_id=None,

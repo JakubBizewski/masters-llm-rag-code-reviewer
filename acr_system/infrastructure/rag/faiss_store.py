@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 from typing import Optional
+from acr_system.shared.utils.token_counter import approx_token_count
 
 try:
     import faiss
@@ -53,6 +54,12 @@ class FAISSStore(EmbeddingStore):
         
         # Lazy load embedding model
         self._embedding_model = None
+
+        # Lightweight accounting for experimental evaluation
+        self.stats: dict[str, int] = {
+            "embedding_tokens": 0,
+            "embedding_texts": 0,
+        }
 
         # Best-effort load persisted index
         self._load_if_exists()
@@ -139,8 +146,16 @@ class FAISSStore(EmbeddingStore):
         except Exception as e:
             logger.warning(f"Failed to persist FAISS index: {e}")
     
+    def reset_stats(self) -> None:
+        self.stats = {
+            "embedding_tokens": 0,
+            "embedding_texts": 0,
+        }
+
     def _embed_text(self, text: str) -> np.ndarray:  # type: ignore
-        """Generate embedding for text."""
+        """Generate embedding for text (also counts approximate tokens)."""
+        self.stats["embedding_tokens"] += approx_token_count(text)
+        self.stats["embedding_texts"] += 1
         return self.embedding_model.encode([text])[0]
     
     async def index_documents(

@@ -2,6 +2,8 @@
 import os
 from typing import Dict, Optional
 
+from acr_system.shared.utils.token_counter import UsageStats
+
 from acr_system.domain.interfaces.ports import LLMProvider
 from acr_system.domain.value_objects.value_objects import LLMConfig
 from acr_system.infrastructure.llm.anthropic_adapter import AnthropicAdapter
@@ -23,6 +25,7 @@ class LLMProviderFactory:
         self,
         openai_api_key: Optional[str] = None,
         anthropic_api_key: Optional[str] = None,
+        usage_stats: Optional[UsageStats] = None,
     ):
         """Initialize factory with API keys.
         
@@ -32,6 +35,9 @@ class LLMProviderFactory:
         """
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         self.anthropic_api_key = anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
+
+        # Optional usage collector for experimental evaluation
+        self.usage_stats = usage_stats
         
         # Cache providers to avoid recreating for same config
         self._provider_cache: Dict[str, LLMProvider] = {}
@@ -89,6 +95,7 @@ class LLMProviderFactory:
                 api_key=self.openai_api_key,
                 model=llm_config.model,
                 ci_parsing_model=os.getenv("OPENAI_CI_MODEL", "gpt-4o-mini"),
+                usage_stats=self.usage_stats,
             )
         
         elif provider_name == "anthropic":
@@ -101,6 +108,7 @@ class LLMProviderFactory:
                 api_key=self.anthropic_api_key,
                 model=llm_config.model,
                 ci_parsing_model=os.getenv("ANTHROPIC_CI_MODEL", "claude-3-5-haiku-20241022"),
+                usage_stats=self.usage_stats,
             )
         
         else:

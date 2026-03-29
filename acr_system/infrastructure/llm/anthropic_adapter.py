@@ -1,6 +1,8 @@
 """Anthropic Claude adapter for LLM operations."""
 from typing import List, Optional, Set
 
+from acr_system.shared.utils.token_counter import UsageStats, approx_token_count
+
 try:
     from anthropic import AsyncAnthropic
     ANTHROPIC_AVAILABLE = True
@@ -31,6 +33,7 @@ class AnthropicAdapter(LLMProvider):
         api_key: str,
         model: str = "claude-3-5-sonnet-20241022",
         ci_parsing_model: str = "claude-3-5-haiku-20241022",
+        usage_stats: Optional[UsageStats] = None,
     ):
         """Initialize Anthropic adapter.
         
@@ -47,6 +50,7 @@ class AnthropicAdapter(LLMProvider):
         self.client = AsyncAnthropic(api_key=api_key)
         self.model = model
         self.ci_parsing_model = ci_parsing_model
+        self.usage_stats = usage_stats
         
         logger.info(f"Initialized Anthropic adapter with model={model}")
     
@@ -84,6 +88,15 @@ class AnthropicAdapter(LLMProvider):
             for block in response.content:
                 if hasattr(block, 'text'):
                     result += block.text
+
+            self._account_usage(
+                prompt_text=(
+                    "You are an expert code reviewer. Provide constructive, specific feedback on code changes.\n"
+                    + prompt
+                ),
+                completion_text=result,
+                response=response,
+            )
             
             # Parse LLM response into ReviewComment objects
             comments = self._parse_review_response(result, diff_hunk)
@@ -97,6 +110,26 @@ class AnthropicAdapter(LLMProvider):
         except Exception as e:
             logger.error(f"Error generating review comments: {e}", exc_info=True)
             raise LLMProviderError(f"Anthropic API error: {e}") from e
+
+    def _account_usage(self, prompt_text: str, completion_text: str, response) -> None:  # type: ignore
+        if self.usage_stats is None:
+            return
+
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            input_tokens = getattr(usage, "input_tokens", None)
+            output_tokens = getattr(usage, "output_tokens", None)
+            if input_tokens is not None or output_tokens is not None:
+                self.usage_stats.add(
+                    prompt_tokens=int(input_tokens or 0),
+                    completion_tokens=int(output_tokens or 0),
+                )
+                return
+
+        self.usage_stats.add(
+            prompt_tokens=approx_token_count(prompt_text),
+            completion_tokens=approx_token_count(completion_text),
+        )
     
     def _build_review_prompt(
         self,
@@ -288,6 +321,15 @@ Focus on: correctness, security, performance, maintainability, and adherence to 
             for block in response.content:
                 if hasattr(block, 'text'):
                     result += block.text
+
+            self._account_usage(
+                prompt_text=(
+                    "You are an expert at parsing CI/CD tool outputs in any format. Extract structured issue information accurately.\n"
+                    + prompt
+                ),
+                completion_text=result,
+                response=response,
+            )
             
             # Parse response
             import json
@@ -339,6 +381,8 @@ Focus on: correctness, security, performance, maintainability, and adherence to 
             for block in response.content:
                 if hasattr(block, 'text'):
                     result += block.text
+
+            self._account_usage(prompt_text=prompt, completion_text=result, response=response)
             
             return result
             

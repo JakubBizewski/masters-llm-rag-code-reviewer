@@ -1,6 +1,8 @@
 """OpenAI adapter for LLM operations."""
 from typing import List, Optional, Set
 
+from acr_system.shared.utils.token_counter import UsageStats, approx_token_count
+
 try:
     from openai import AsyncOpenAI
     OPENAI_AVAILABLE = True
@@ -31,6 +33,7 @@ class OpenAIAdapter(LLMProvider):
         api_key: str,
         model: str = "gpt-4o",
         ci_parsing_model: str = "gpt-4o-mini",
+        usage_stats: Optional[UsageStats] = None,
     ):
         """Initialize OpenAI adapter.
         
@@ -47,6 +50,7 @@ class OpenAIAdapter(LLMProvider):
         self.client = AsyncOpenAI(api_key=api_key)
         self.model = model
         self.ci_parsing_model = ci_parsing_model
+        self.usage_stats = usage_stats
     
     async def generate_review_comments(
         self,
@@ -81,6 +85,15 @@ class OpenAIAdapter(LLMProvider):
             )
             
             result = response.choices[0].message.content
+
+            self._account_usage(
+                prompt_text=(
+                    "You are an expert code reviewer. Provide constructive, specific feedback on code changes.\n"
+                    + prompt
+                ),
+                completion_text=result or "",
+                response=response,
+            )
             
             # Parse LLM response into ReviewComment objects
             comments = self._parse_review_response(result, diff_hunk)
@@ -90,6 +103,26 @@ class OpenAIAdapter(LLMProvider):
         except Exception as e:
             logger.error(f"Error generating review comments: {e}", exc_info=True)
             raise LLMProviderError(f"OpenAI API error: {e}") from e
+
+    def _account_usage(self, prompt_text: str, completion_text: str, response) -> None:  # type: ignore
+        if self.usage_stats is None:
+            return
+
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            prompt_tokens = getattr(usage, "prompt_tokens", None)
+            completion_tokens = getattr(usage, "completion_tokens", None)
+            if prompt_tokens is not None or completion_tokens is not None:
+                self.usage_stats.add(
+                    prompt_tokens=int(prompt_tokens or 0),
+                    completion_tokens=int(completion_tokens or 0),
+                )
+                return
+
+        self.usage_stats.add(
+            prompt_tokens=approx_token_count(prompt_text),
+            completion_tokens=approx_token_count(completion_text),
+        )
     
     def _build_review_prompt(
         self,
@@ -280,6 +313,15 @@ Focus on: correctness, security, performance, maintainability, and adherence to 
             )
             
             result = response.choices[0].message.content
+
+            self._account_usage(
+                prompt_text=(
+                    "You are an expert at parsing CI/CD tool outputs in any format. Extract structured issue information accurately.\n"
+                    + prompt
+                ),
+                completion_text=result or "",
+                response=response,
+            )
             
             # Parse response
             import json
@@ -322,7 +364,9 @@ Focus on: correctness, security, performance, maintainability, and adherence to 
                 max_tokens=max_tokens,
             )
             
-            return response.choices[0].message.content or ""
+            text = response.choices[0].message.content or ""
+            self._account_usage(prompt_text=prompt, completion_text=text, response=response)
+            return text
             
         except Exception as e:
             raise LLMProviderError(f"OpenAI API error: {e}") from e
