@@ -2,6 +2,7 @@
 import asyncio
 import os
 from typing import Optional
+from urllib.parse import urlparse
 
 import click
 from dotenv import load_dotenv
@@ -15,10 +16,11 @@ from acr_system.ast.tree_sitter_adapter import TreeSitterAdapter
 from acr_system.domain.services.services import ContextBuilder, ReviewOrchestrator
 from acr_system.infrastructure.auth.github_jwt import GitHubAppAuth
 from acr_system.infrastructure.ci.github_checks_adapter import GitHubChecksAdapter
+from acr_system.infrastructure.ci.gitlab_ci_adapter import GitLabCIAdapter
 from acr_system.infrastructure.config.yaml_config_loader import YAMLConfigLoader
 from acr_system.infrastructure.llm.llm_factory import LLMProviderFactory
 from acr_system.infrastructure.rag.faiss_store import FAISSStore
-from acr_system.infrastructure.vcs.github_adapter import GitHubAdapter
+from acr_system.infrastructure.vcs import GitHubAdapter, GitLabAdapter
 from acr_system.shared.logging.logger import configure_logging, get_logger
 
 # Load environment variables
@@ -48,9 +50,16 @@ def review(
 @cli.command("index-history")
 @click.option("--repo", required=True, help="Repository (e.g., owner/repo)")
 @click.option("--max-prs", default=50, show_default=True, type=int, help="Max merged PRs to index")
-def index_history(repo: str, max_prs: int) -> None:
+@click.option(
+    "--provider",
+    type=click.Choice(["github", "gitlab"], case_sensitive=False),
+    default="github",
+    show_default=True,
+    help="VCS provider for the repository",
+)
+def index_history(repo: str, max_prs: int, provider: str) -> None:
     """Index historical merged PR changes (diff + comments) for a repository."""
-    asyncio.run(_index_history_async(repo, max_prs))
+    asyncio.run(_index_history_async(repo, max_prs, provider.lower()))
 
 
 async def _review_async(
@@ -59,25 +68,11 @@ async def _review_async(
 ) -> None:
     """Async implementation of review command."""
     try:
-        # Parse PR URL
-        repo, pr_number = _parse_pr_url(pr_url)
+        # Parse PR/MR URL
+        repo, pr_number, provider = _parse_pr_url(pr_url)
         click.echo(f"Reviewing PR #{pr_number} in {repo}")
-        
-        # Initialize GitHub App authentication
-        app_id = os.getenv("GITHUB_APP_ID")
-        private_key_path = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH")
-        installation_id = os.getenv("GITHUB_APP_INSTALLATION_ID")
-        
-        if not app_id or not private_key_path:
-            click.echo("Error: GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH must be set", err=True)
-            return
-        
-        auth = GitHubAppAuth(
-            app_id=app_id,
-            private_key_path=private_key_path,
-            installation_id=installation_id,
-        )
-        vcs_adapter = GitHubAdapter(auth=auth)
+
+        vcs_adapter, ci_analyzer = _create_adapters(provider)
         
         # Initialize LLM provider factory
         # Note: --provider and --model flags are deprecated, use .acr-config.yml instead
@@ -96,9 +91,6 @@ async def _review_async(
         
         # Initialize config loader
         config_loader = YAMLConfigLoader(vcs_repository=vcs_adapter)
-        
-        # Initialize CI analyzer
-        ci_analyzer = GitHubChecksAdapter(auth=auth)
         
         # Initialize AST parser
         ast_parser = TreeSitterAdapter()
@@ -181,44 +173,47 @@ async def _review_async(
         logger.error(f"Review failed: {e}", exc_info=True)
 
 
-def _parse_pr_url(url: str) -> tuple[str, int]:
-    """Parse GitHub PR URL into (repo, pr_number)."""
-    # Example: https://github.com/owner/repo/pull/123
-    parts = url.rstrip('/').split('/')
-    
-    if 'github.com' in url:
-        # Find 'pull' index
+def _parse_pr_url(url: str) -> tuple[str, int, str]:
+    """Parse PR/MR URL into (repo, pr_number, provider)."""
+    parsed = urlparse(url)
+    host = (parsed.netloc or "").lower()
+    path_parts = [p for p in (parsed.path or "").strip("/").split("/") if p]
+
+    if host.endswith("github.com"):
+        # Example: https://github.com/owner/repo/pull/123
         try:
-            pull_idx = parts.index('pull')
-            owner = parts[pull_idx - 2]
-            repo_name = parts[pull_idx - 1]
-            pr_number = int(parts[pull_idx + 1])
-            
-            return f"{owner}/{repo_name}", pr_number
+            pull_idx = path_parts.index("pull")
+            owner = path_parts[pull_idx - 2]
+            repo_name = path_parts[pull_idx - 1]
+            pr_number = int(path_parts[pull_idx + 1])
+            return f"{owner}/{repo_name}", pr_number, "github"
         except (ValueError, IndexError):
             raise ValueError(f"Invalid GitHub PR URL: {url}")
-    
+
+    if "gitlab" in host:
+        # Example: https://gitlab.com/group/project/-/merge_requests/123
+        try:
+            mr_idx = path_parts.index("merge_requests")
+            pr_number = int(path_parts[mr_idx + 1])
+
+            repo_parts = path_parts[:mr_idx]
+            if repo_parts and repo_parts[-1] == "-":
+                repo_parts = repo_parts[:-1]
+            if not repo_parts:
+                raise ValueError("Missing repo path")
+
+            return "/".join(repo_parts), pr_number, "gitlab"
+        except (ValueError, IndexError):
+            raise ValueError(f"Invalid GitLab MR URL: {url}")
+
     raise ValueError(f"Unsupported VCS URL: {url}")
 
 
-async def _index_history_async(repo: str, max_prs: int) -> None:
+async def _index_history_async(repo: str, max_prs: int, provider: str) -> None:
     try:
         click.echo(f"Indexing merged PR history for {repo} (max {max_prs})")
 
-        app_id = os.getenv("GITHUB_APP_ID")
-        private_key_path = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH")
-        installation_id = os.getenv("GITHUB_APP_INSTALLATION_ID")
-
-        if not app_id or not private_key_path:
-            click.echo("Error: GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH must be set", err=True)
-            return
-
-        auth = GitHubAppAuth(
-            app_id=app_id,
-            private_key_path=private_key_path,
-            installation_id=installation_id,
-        )
-        vcs_adapter = GitHubAdapter(auth=auth)
+        vcs_adapter, _ = _create_adapters(provider)
 
         embedding_model = os.getenv("RAG_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
         rag_storage_path = os.getenv("RAG_FAISS_INDEX_PATH", "./faiss_index")
@@ -247,6 +242,35 @@ async def _index_history_async(repo: str, max_prs: int) -> None:
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         logger.error(f"Index history failed: {e}", exc_info=True)
+
+
+def _create_adapters(provider: str) -> tuple[GitHubAdapter | GitLabAdapter, GitHubChecksAdapter | GitLabCIAdapter]:
+    """Create VCS + CI adapters based on provider."""
+    if provider == "github":
+        app_id = os.getenv("GITHUB_APP_ID")
+        private_key_path = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH")
+        installation_id = os.getenv("GITHUB_APP_INSTALLATION_ID")
+
+        if not app_id or not private_key_path:
+            raise ValueError("GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH must be set")
+
+        auth = GitHubAppAuth(
+            app_id=app_id,
+            private_key_path=private_key_path,
+            installation_id=installation_id,
+        )
+
+        return GitHubAdapter(auth=auth), GitHubChecksAdapter(auth=auth)
+
+    if provider == "gitlab":
+        token = os.getenv("GITLAB_TOKEN")
+        api_base = os.getenv("GITLAB_API_BASE", "https://gitlab.com/api/v4")
+        if not token:
+            raise ValueError("GITLAB_TOKEN must be set")
+
+        return GitLabAdapter(token=token, api_base=api_base), GitLabCIAdapter(token=token, api_base=api_base)
+
+    raise ValueError(f"Unsupported provider: {provider}")
 
 
 @cli.command()
