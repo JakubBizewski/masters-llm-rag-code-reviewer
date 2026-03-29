@@ -7,6 +7,8 @@ import click
 from dotenv import load_dotenv
 
 from acr_system.application.dto.dto import PRReviewRequest, ReviewPublishRequest
+from acr_system.application.dto.dto import PRHistoryIndexRequest
+from acr_system.application.use_cases.index_pr_history import IndexPRHistoryUseCase
 from acr_system.application.use_cases.process_pull_request import ProcessPullRequestUseCase
 from acr_system.application.use_cases.publish_review import PublishReviewUseCase
 from acr_system.ast.tree_sitter_adapter import TreeSitterAdapter
@@ -41,6 +43,14 @@ def review(
 ) -> None:
     """Review a pull request."""
     asyncio.run(_review_async(pr_url, publish))
+
+
+@cli.command("index-history")
+@click.option("--repo", required=True, help="Repository (e.g., owner/repo)")
+@click.option("--max-prs", default=50, show_default=True, type=int, help="Max merged PRs to index")
+def index_history(repo: str, max_prs: int) -> None:
+    """Index historical merged PR changes (diff + comments) for a repository."""
+    asyncio.run(_index_history_async(repo, max_prs))
 
 
 async def _review_async(
@@ -78,7 +88,11 @@ async def _review_async(
         
         # Initialize RAG store
         embedding_model = os.getenv("RAG_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-        rag_store = FAISSStore(embedding_model_name=embedding_model)
+        rag_storage_path = os.getenv("RAG_FAISS_INDEX_PATH", "./faiss_index")
+        rag_store = FAISSStore(
+            embedding_model_name=embedding_model,
+            storage_path=rag_storage_path,
+        )
         
         # Initialize config loader
         config_loader = YAMLConfigLoader(vcs_repository=vcs_adapter)
@@ -185,6 +199,54 @@ def _parse_pr_url(url: str) -> tuple[str, int]:
             raise ValueError(f"Invalid GitHub PR URL: {url}")
     
     raise ValueError(f"Unsupported VCS URL: {url}")
+
+
+async def _index_history_async(repo: str, max_prs: int) -> None:
+    try:
+        click.echo(f"Indexing merged PR history for {repo} (max {max_prs})")
+
+        app_id = os.getenv("GITHUB_APP_ID")
+        private_key_path = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH")
+        installation_id = os.getenv("GITHUB_APP_INSTALLATION_ID")
+
+        if not app_id or not private_key_path:
+            click.echo("Error: GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH must be set", err=True)
+            return
+
+        auth = GitHubAppAuth(
+            app_id=app_id,
+            private_key_path=private_key_path,
+            installation_id=installation_id,
+        )
+        vcs_adapter = GitHubAdapter(auth=auth)
+
+        embedding_model = os.getenv("RAG_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+        rag_storage_path = os.getenv("RAG_FAISS_INDEX_PATH", "./faiss_index")
+        rag_store = FAISSStore(
+            embedding_model_name=embedding_model,
+            storage_path=rag_storage_path,
+        )
+
+        use_case = IndexPRHistoryUseCase(
+            vcs_repository=vcs_adapter,
+            embedding_store=rag_store,
+        )
+
+        result = await use_case.execute(
+            PRHistoryIndexRequest(repository=repo, max_prs=max_prs)
+        )
+
+        if not result.success:
+            click.echo(f"✗ Indexing failed: {result.error_message}", err=True)
+            return
+
+        click.echo(f"✓ Indexed: {result.indexed_count}, skipped: {result.skipped_count}")
+        click.echo(f"Stored in: {rag_storage_path}")
+
+        await vcs_adapter.close()
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        logger.error(f"Index history failed: {e}", exc_info=True)
 
 
 @cli.command()

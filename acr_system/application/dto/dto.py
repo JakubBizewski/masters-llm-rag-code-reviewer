@@ -63,3 +63,22 @@ class ReviewPublishRequest:
     pr_number: int
     comments: List[ReviewComment]
     mode: str = "comment"  # "comment" | "review" | "approve" | "request_changes"
+
+
+@dataclass
+class PRHistoryIndexRequest:
+    """Request to index historical merged PRs for a repository."""
+
+    repository: str  # "owner/repo"
+    max_prs: int = 50
+
+
+@dataclass
+class PRHistoryIndexResult:
+    """Result of indexing PR history."""
+
+    repository: str
+    indexed_count: int
+    skipped_count: int
+    success: bool
+    error_message: Optional[str] = None

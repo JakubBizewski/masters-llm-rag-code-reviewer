@@ -10,6 +10,7 @@ from acr_system.domain.entities.entities import (
     FunctionNode,
     ParsedCIIssue,
     PullRequest,
+    PullRequestDiscussionComment,
     ReviewComment,
 )
 from acr_system.domain.value_objects.value_objects import (
@@ -63,6 +64,30 @@ class VCSRepository(ABC):
         ref: str,
     ) -> str:
         """Get file content at a specific ref (branch/commit)."""
+        pass
+
+    @abstractmethod
+    async def list_merged_pull_requests(
+        self,
+        repo: str,
+        limit: int = 50,
+    ) -> List[int]:
+        """List merged pull requests (most recent first).
+
+        Returns a list of PR numbers.
+        """
+        pass
+
+    @abstractmethod
+    async def get_pull_request_discussion_comments(
+        self,
+        repo: str,
+        pr_number: int,
+    ) -> List[PullRequestDiscussionComment]:
+        """Fetch PR discussion comments (review comments + issue comments).
+
+        Returned comments should include replies (threading info) when available.
+        """
         pass
 
 

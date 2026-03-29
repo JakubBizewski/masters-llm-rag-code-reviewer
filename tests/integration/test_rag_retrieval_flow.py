@@ -55,7 +55,7 @@ async def test_rag_retrieval_with_relevant_documentation(
     mock_vcs_repository.get_file_content.return_value = "# Redis client implementation"
     
     # === Mock RAG results ===
-    mock_embedding_store.search_similar.return_value = [
+    docs_results = [
         CodeContext(
             content="Redis best practice: Always set TTL on cache entries to prevent memory bloat",
             source="redis_guidelines",
@@ -75,6 +75,16 @@ async def test_rag_retrieval_with_relevant_documentation(
             relevance_score=0.82,
         ),
     ]
+
+    history_results = [
+        CodeContext(
+            content="Pull Request #101: Add Redis cache\n=== DIFF ===\n...\n=== DISCUSSION ===\n- reviewer: Please add TTL\n  - author: Added TTL in next commit",
+            source="pr_history",
+            relevance_score=0.77,
+        )
+    ]
+
+    mock_embedding_store.search_similar.side_effect = [docs_results, history_results]
     
     # === Build context ===
     context_builder = ContextBuilder(
@@ -96,14 +106,14 @@ async def test_rag_retrieval_with_relevant_documentation(
     # === Assertions ===
     
     # 1. RAG search was called
-    mock_embedding_store.search_similar.assert_called_once()
+    assert mock_embedding_store.search_similar.call_count == 2
     
     # 2. Query contains relevant information
-    call_args = mock_embedding_store.search_similar.call_args
-    query = call_args.kwargs['query']
+    first_call = mock_embedding_store.search_similar.call_args_list[0]
+    query = first_call.kwargs['query']
     assert "redis" in query.lower() or "cache" in query.lower(), \
         "Query should contain relevant keywords"
-    assert call_args.kwargs['top_k'] == 5
+    assert first_call.kwargs['top_k'] == 5
     
     # 3. Context includes RAG results
     assert len(context) >= 3, "Should have at least 3 context items (RAG results)"
@@ -111,6 +121,10 @@ async def test_rag_retrieval_with_relevant_documentation(
     # 4. RAG results are in context
     rag_contexts = [c for c in context if c.source in ["redis_guidelines", "performance_guide", "error_handling_guide"]]
     assert len(rag_contexts) == 3, "All RAG results should be in context"
+
+    # 4b. Historical PR change context is also included
+    history_contexts = [c for c in context if c.source == "pr_history"]
+    assert len(history_contexts) == 1
     
     # 5. Results are sorted by relevance
     scores = [c.relevance_score for c in rag_contexts]
@@ -158,7 +172,7 @@ async def test_rag_retrieval_with_no_relevant_results(
     
     # === Mock responses ===
     mock_vcs_repository.get_file_content.return_value = "def helper():\n    pass"
-    mock_embedding_store.search_similar.return_value = []  # No results
+    mock_embedding_store.search_similar.side_effect = [[], []]  # docs + history: no results
     
     # === Build context ===
     context_builder = ContextBuilder(
@@ -177,7 +191,7 @@ async def test_rag_retrieval_with_no_relevant_results(
     # === Assertions ===
     
     # 1. RAG was attempted
-    mock_embedding_store.search_similar.assert_called_once()
+    assert mock_embedding_store.search_similar.call_count == 2
     
     # 2. Context is not empty (has surrounding code)
     assert len(context) >= 0, "Context should be valid even without RAG results"
@@ -297,7 +311,7 @@ async def test_rag_retrieval_with_multiple_languages(
     )
     
     mock_vcs_repository.get_file_content.return_value = "# Python API"
-    mock_embedding_store.search_similar.return_value = [
+    python_docs = [
         CodeContext(
             content="FastAPI best practices: Use dependency injection",
             source="python_api_docs",
@@ -305,6 +319,9 @@ async def test_rag_retrieval_with_multiple_languages(
             relevance_score=0.9,
         )
     ]
+
+    # Two calls per hunk: docs + history
+    mock_embedding_store.search_similar.side_effect = [python_docs, []]
     
     python_context = await context_builder.build_context(
         diff_hunk=python_hunk,
@@ -313,8 +330,8 @@ async def test_rag_retrieval_with_multiple_languages(
     )
     
     # Verify Python RAG was called
-    assert mock_embedding_store.search_similar.call_count == 1
-    python_query = mock_embedding_store.search_similar.call_args.kwargs['query']
+    assert mock_embedding_store.search_similar.call_count == 2
+    python_query = mock_embedding_store.search_similar.call_args_list[0].kwargs['query']
     assert "api.py" in python_query
     
     # === Test 2: JavaScript hunk ===
@@ -333,7 +350,7 @@ async def test_rag_retrieval_with_multiple_languages(
     )
     
     mock_vcs_repository.get_file_content.return_value = "// JavaScript app"
-    mock_embedding_store.search_similar.return_value = [
+    js_docs = [
         CodeContext(
             content="React hooks: Use useState for component state",
             source="react_docs",
@@ -341,6 +358,8 @@ async def test_rag_retrieval_with_multiple_languages(
             relevance_score=0.88,
         )
     ]
+
+    mock_embedding_store.search_similar.side_effect = [js_docs, []]
     
     js_context = await context_builder.build_context(
         diff_hunk=js_hunk,
@@ -349,8 +368,8 @@ async def test_rag_retrieval_with_multiple_languages(
     )
     
     # Verify JavaScript RAG was called
-    assert mock_embedding_store.search_similar.call_count == 2
-    js_query = mock_embedding_store.search_similar.call_args.kwargs['query']
+    assert mock_embedding_store.search_similar.call_count == 4
+    js_query = mock_embedding_store.search_similar.call_args_list[2].kwargs['query']
     assert "app.js" in js_query
     
     # === Assertions ===
@@ -394,7 +413,7 @@ async def test_rag_retrieval_with_similarity_threshold(
     
     # Note: In real implementation, min_similarity filtering happens in the adapter
     # Here we simulate what the adapter would return
-    mock_embedding_store.search_similar.return_value = [
+    docs_results = [
         CodeContext(
             content="Highly relevant documentation",
             source="high_quality_doc",
@@ -409,6 +428,8 @@ async def test_rag_retrieval_with_similarity_threshold(
         ),
         # Low relevance results filtered by adapter (not included)
     ]
+
+    mock_embedding_store.search_similar.side_effect = [docs_results, []]
     
     context_builder = ContextBuilder(
         embedding_store=mock_embedding_store,
@@ -476,7 +497,7 @@ async def test_rag_retrieval_query_construction(
     )
     
     mock_vcs_repository.get_file_content.return_value = "# Database queries"
-    mock_embedding_store.search_similar.return_value = []
+    mock_embedding_store.search_similar.side_effect = [[], []]
     
     context_builder = ContextBuilder(
         embedding_store=mock_embedding_store,
@@ -492,10 +513,10 @@ async def test_rag_retrieval_query_construction(
     )
     
     # === Assertions on query construction ===
-    mock_embedding_store.search_similar.assert_called_once()
+    assert mock_embedding_store.search_similar.call_count == 2
     
-    call_args = mock_embedding_store.search_similar.call_args
-    query = call_args.kwargs['query']
+    first_call = mock_embedding_store.search_similar.call_args_list[0]
+    query = first_call.kwargs['query']
     
     # 1. Query includes file path
     assert "queries.py" in query, "Query should include file name"

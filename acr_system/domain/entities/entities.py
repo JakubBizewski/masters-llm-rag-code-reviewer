@@ -176,6 +176,7 @@ class PullRequest:
     diff_hunks: List[DiffHunk] = field(default_factory=list)
     ci_results: List[CIToolResult] = field(default_factory=list)
     review_comments: List[ReviewComment] = field(default_factory=list)
+    discussion_comments: List["PullRequestDiscussionComment"] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.utcnow)
     
     def __post_init__(self) -> None:
@@ -197,6 +198,10 @@ class PullRequest:
     def add_review_comment(self, comment: ReviewComment) -> None:
         """Add review comment to the PR."""
         self.review_comments.append(comment)
+
+    def add_discussion_comment(self, comment: "PullRequestDiscussionComment") -> None:
+        """Add discussion comment (from VCS) to the PR."""
+        self.discussion_comments.append(comment)
     
     @property
     def changed_files(self) -> Set[str]:
@@ -248,3 +253,23 @@ class FunctionNode:
     def contains_line(self, line_number: int) -> bool:
         """Check if a line number is within this function."""
         return self.start_line <= line_number <= self.end_line
+
+
+@dataclass
+class PullRequestDiscussionComment:
+    """A discussion comment on a PR/MR (including review threads and replies)."""
+
+    comment_id: int
+    author: str
+    body: str
+    created_at: datetime
+    file_path: Optional[FilePath] = None
+    line_number: Optional[int] = None
+    in_reply_to_id: Optional[int] = None
+    url: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if not self.author:
+            raise ValueError("author cannot be empty")
+        if not self.body:
+            raise ValueError("body cannot be empty")

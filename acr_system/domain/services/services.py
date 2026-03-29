@@ -61,6 +61,23 @@ class ContextBuilder:
                 top_k=rag_config.top_k,
             )
             context.extend(rag_results)
+
+            # Also retrieve similar historical PR changes (diff + discussion)
+            history_results = await self.embedding_store.search_similar(
+                query=query,
+                top_k=min(3, rag_config.top_k),
+                filters={
+                    "source": "pr_history",
+                    "repo": pr.repository,
+                },
+            )
+
+            # Avoid duplicating identical contexts
+            existing_contents = {c.content for c in context}
+            for item in history_results:
+                if item.content not in existing_contents:
+                    context.append(item)
+                    existing_contents.add(item.content)
         
         # Add surrounding code context
         surrounding_context = await self._get_surrounding_context(diff_hunk, pr)
