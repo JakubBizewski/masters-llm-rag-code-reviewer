@@ -55,18 +55,19 @@ def review(
 
 
 @cli.command("index-history")
-@click.option("--repo", required=True, help="Repository (e.g., owner/repo)")
+@click.option("--repo", required=True, help="Repository (e.g., owner/repo or https://github.com/owner/repo)")
 @click.option("--max-prs", default=50, show_default=True, type=int, help="Max merged PRs to index")
 @click.option(
     "--provider",
     type=click.Choice(["github", "gitlab"], case_sensitive=False),
-    default="github",
-    show_default=True,
-    help="VCS provider for the repository",
+    default=None,
+    show_default=False,
+    help="Optional provider override; otherwise inferred from --repo when it's a URL",
 )
-def index_history(repo: str, max_prs: int, provider: str) -> None:
+def index_history(repo: str, max_prs: int, provider: Optional[str]) -> None:
     """Index historical merged PR changes (diff + comments) for a repository."""
-    asyncio.run(_index_history_async(repo, max_prs, provider.lower()))
+    chosen_provider = provider.lower() if provider else _infer_provider_from_repo_arg(repo)
+    asyncio.run(_index_history_async(repo, max_prs, chosen_provider))
 
 
 @cli.command("evaluate")
@@ -227,9 +228,32 @@ def _parse_pr_url(url: str) -> tuple[str, int, str]:
     raise ValueError(f"Unsupported VCS URL: {url}")
 
 
+def _infer_provider_from_repo_arg(repo: str) -> str:
+    """Infer VCS provider from repo argument.
+
+    - If repo is a URL: detect provider from host.
+    - If repo is a slug (owner/repo or group/project): default to github.
+    """
+    value = (repo or "").strip()
+    if not value:
+        raise ValueError("Empty repo")
+
+    if value.startswith("http://") or value.startswith("https://"):
+        parsed = urlparse(value)
+        host = (parsed.netloc or "").lower()
+        if host.endswith("github.com"):
+            return "github"
+        if "gitlab" in host:
+            return "gitlab"
+        raise ValueError(f"Unsupported repo URL host: {host}")
+
+    return "github"
+
+
 async def _index_history_async(repo: str, max_prs: int, provider: str) -> None:
     try:
-        click.echo(f"Indexing merged PR history for {repo} (max {max_prs})")
+        canonical_repo = _parse_repo_arg(repo, provider)
+        click.echo(f"Indexing merged PR history for {canonical_repo} (max {max_prs})")
 
         vcs_adapter, _ = _create_adapters(provider)
 
@@ -246,7 +270,7 @@ async def _index_history_async(repo: str, max_prs: int, provider: str) -> None:
         )
 
         result = await use_case.execute(
-            PRHistoryIndexRequest(repository=repo, max_prs=max_prs)
+            PRHistoryIndexRequest(repository=canonical_repo, max_prs=max_prs)
         )
 
         if not result.success:
@@ -260,6 +284,46 @@ async def _index_history_async(repo: str, max_prs: int, provider: str) -> None:
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         logger.error(f"Index history failed: {e}", exc_info=True)
+
+
+def _parse_repo_arg(repo: str, provider: str) -> str:
+    """Accept repo as either canonical path (owner/repo) or full URL.
+
+    Examples:
+    - github: https://github.com/owner/repo -> owner/repo
+    - gitlab: https://gitlab.com/group/project -> group/project
+    """
+    value = (repo or "").strip()
+    if not value:
+        raise ValueError("Empty repo")
+
+    if value.startswith("http://") or value.startswith("https://"):
+        parsed = urlparse(value)
+        path_parts = [p for p in (parsed.path or "").strip("/").split("/") if p]
+
+        if path_parts and path_parts[-1].endswith(".git"):
+            path_parts[-1] = path_parts[-1][:-4]
+
+        if provider == "github":
+            # https://github.com/owner/repo
+            if len(path_parts) < 2:
+                raise ValueError(f"Invalid GitHub repo URL: {value}")
+            return f"{path_parts[0]}/{path_parts[1]}"
+
+        if provider == "gitlab":
+            # https://gitlab.com/group/project (can be nested groups)
+            if not path_parts:
+                raise ValueError(f"Invalid GitLab repo URL: {value}")
+            # drop possible '/-/' segment if present
+            if "-" in path_parts:
+                dash = path_parts.index("-")
+                path_parts = path_parts[:dash]
+            return "/".join(path_parts)
+
+        raise ValueError(f"Unsupported provider: {provider}")
+
+    # Already in canonical form
+    return value
 
 
 def _create_adapters(provider: str) -> tuple[GitHubAdapter | GitLabAdapter, GitHubChecksAdapter | GitLabCIAdapter]:
