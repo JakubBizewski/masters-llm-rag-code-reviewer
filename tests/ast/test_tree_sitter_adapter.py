@@ -1,10 +1,14 @@
 """Tests for TreeSitterAdapter."""
+import importlib.util
 import pytest
 from unittest.mock import MagicMock, patch
 
 from acr_system.ast.tree_sitter_adapter import TreeSitterAdapter, TREE_SITTER_AVAILABLE
 from acr_system.domain.entities.entities import DiffHunk, FunctionNode
 from acr_system.domain.value_objects.value_objects import FilePath, Language
+
+
+PYTHON_PARSER_AVAILABLE = importlib.util.find_spec("tree_sitter_python") is not None
 
 
 @pytest.mark.skipif(not TREE_SITTER_AVAILABLE, reason="tree-sitter not installed")
@@ -124,7 +128,10 @@ class TestTreeSitterIntegration:
     They require tree-sitter parsers to be built and available.
     """
     
-    @pytest.mark.skipif(not TREE_SITTER_AVAILABLE, reason="tree-sitter not installed")
+    @pytest.mark.skipif(
+        not (TREE_SITTER_AVAILABLE and PYTHON_PARSER_AVAILABLE),
+        reason="tree-sitter python parser not installed",
+    )
     def test_extract_python_functions_from_real_code(self):
         """Integration test: extract functions from real Python code."""
         adapter = TreeSitterAdapter()
@@ -159,7 +166,10 @@ def apply_coupon(order, coupon_code):
         assert calc_discount_func.end_line >= calc_discount_func.start_line
         assert "calculate_discount" in calc_discount_func.body
     
-    @pytest.mark.skipif(not TREE_SITTER_AVAILABLE, reason="tree-sitter not installed")
+    @pytest.mark.skipif(
+        not (TREE_SITTER_AVAILABLE and PYTHON_PARSER_AVAILABLE),
+        reason="tree-sitter python parser not installed",
+    )
     def test_extract_python_classes_from_real_code(self):
         """Integration test: extract classes from real Python code."""
         adapter = TreeSitterAdapter()
@@ -189,7 +199,10 @@ class AdminUser:
         assert "UserRepository" in class_names
         assert "AdminUser" in class_names
     
-    @pytest.mark.skipif(not TREE_SITTER_AVAILABLE, reason="tree-sitter not installed")
+    @pytest.mark.skipif(
+        not (TREE_SITTER_AVAILABLE and PYTHON_PARSER_AVAILABLE),
+        reason="tree-sitter python parser not installed",
+    )
     def test_extract_python_imports_from_real_code(self):
         """Integration test: extract imports from real Python code."""
         adapter = TreeSitterAdapter()

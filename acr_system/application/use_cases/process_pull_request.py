@@ -125,7 +125,24 @@ class ProcessPullRequestUseCase:
             logger.info(f"Generated {len(all_comments)} review comments")
             
             # 4. Index this review for future RAG
-            # await self.embedding_store.index_review_history(pr)
+            try:
+                pr.discussion_comments = (
+                    await self.vcs_repository.get_pull_request_discussion_comments(
+                        repo=request.repository,
+                        pr_number=request.pr_number,
+                    )
+                )
+            except Exception as e:
+                logger.debug(
+                    f"Failed to fetch discussion comments for PR #{request.pr_number}: {e}"
+                )
+
+            try:
+                await self.embedding_store.index_review_history(pr)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to index review history for PR #{request.pr_number}: {e}"
+                )
             
             return ReviewResult(
                 repository=request.repository,

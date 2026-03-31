@@ -18,6 +18,7 @@ from acr_system.domain.entities.entities import (
     ArchitecturalDocument,
     CodeContext,
     PullRequest,
+    PullRequestDiscussionComment,
 )
 from acr_system.domain.interfaces.ports import EmbeddingStore
 from acr_system.shared.exceptions.infrastructure_exceptions import EmbeddingStoreError
@@ -247,52 +248,92 @@ class FAISSStore(EmbeddingStore):
         self,
         pr: PullRequest,
     ) -> None:
-        """Index PR review for future RAG retrieval."""
+        """Index PR review history for future RAG retrieval.
+
+        Approach:
+        - Index each discussion thread (root comment + replies) as a separate document.
+        - Include minimal diff context (best-effort) for the comment's file/line.
+        - If the PR has no discussion comments, index a single diff-only document.
+        """
         try:
             self._initialize_index()
-            
-            diff_text_parts: list[str] = []
-            for hunk in pr.diff_hunks:
-                diff_text_parts.append(f"### {hunk.file_path.value}\n{hunk.content}")
-            diff_text = "\n\n".join(diff_text_parts)
 
-            discussion_text = _format_discussion(pr)
+            by_parent, roots = _build_discussion_threads(pr)
 
-            # Create document from PR history (diff + discussion)
-            content = (
+            common_header = (
                 f"Pull Request #{pr.pr_number}: {pr.title}\n"
                 f"Repository: {pr.repository}\n"
                 f"Author: {pr.author}\n"
                 f"Source branch: {pr.source_branch}\n"
                 f"Target branch: {pr.target_branch}\n"
-                f"Files changed: {', '.join(sorted(pr.changed_files))}\n\n"
-                f"=== DIFF ===\n{diff_text}\n\n"
-                f"=== DISCUSSION (comments + replies) ===\n{discussion_text}\n"
+                f"Files changed: {', '.join(sorted(pr.changed_files))}\n"
             )
 
-            # Cap text size for embedding cost/performance
-            max_chars = 25_000
-            if len(content) > max_chars:
-                content = content[:max_chars] + "\n\n[TRUNCATED]"
-            
-            # Generate embedding
-            embedding = self._embed_text(content)
-            
-            # Add to index
-            self.index.add(np.array([embedding], dtype=np.float32))  # type: ignore
-            
-            # Store metadata
-            self.documents.append({
-                "filename": f"PR-{pr.pr_number}",
-                "content": content,
-                "source": "pr_history",
-                "repo": pr.repository,
-                "pr_number": str(pr.pr_number),
-            })
+            if not roots:
+                diff_text = _format_full_diff(pr)
+                content = (
+                    f"{common_header}\n"
+                    f"=== DIFF ===\n{diff_text}\n"
+                )
+
+                content = _truncate_for_embedding(content, max_chars=25_000)
+                embedding = self._embed_text(content)
+                self.index.add(np.array([embedding], dtype=np.float32))  # type: ignore
+                self.documents.append({
+                    "filename": f"PR-{pr.pr_number}-diff",
+                    "content": content,
+                    "source": "pr_history_diff",
+                    "repo": pr.repository,
+                    "pr_number": str(pr.pr_number),
+                })
+
+                self._persist()
+                logger.info(
+                    f"Indexed diff-only history for PR #{pr.pr_number} (no discussion comments)"
+                )
+                return
+
+            indexed_threads = 0
+            for root in roots:
+                diff_context = _format_diff_context_for_comment(pr, root)
+                thread_text = _format_thread(root, by_parent)
+
+                location = ""
+                if root.file_path and root.line_number:
+                    location = f" ({root.file_path.value}:{root.line_number})"
+                elif root.file_path:
+                    location = f" ({root.file_path.value})"
+
+                content = (
+                    f"{common_header}"
+                    f"Thread root comment #{root.comment_id}{location}\n\n"
+                    f"=== DIFF CONTEXT (best-effort) ===\n{diff_context}\n\n"
+                    f"=== DISCUSSION THREAD (comment + replies) ===\n{thread_text}\n"
+                )
+
+                content = _truncate_for_embedding(content, max_chars=20_000)
+                embedding = self._embed_text(content)
+                self.index.add(np.array([embedding], dtype=np.float32))  # type: ignore
+                self.documents.append({
+                    "filename": f"PR-{pr.pr_number}-comment-{root.comment_id}",
+                    "content": content,
+                    "source": "pr_history_comment_thread",
+                    "repo": pr.repository,
+                    "pr_number": str(pr.pr_number),
+                    "comment_id": str(root.comment_id),
+                    "file_path": root.file_path.value if root.file_path else None,
+                    "line_number": str(root.line_number) if root.line_number else None,
+                    "url": getattr(root, "url", None),
+                })
+                indexed_threads += 1
+                logger.info(
+                    f"Indexed discussion thread for comment #{root.comment_id} in PR #{pr.pr_number}"
+                )
 
             self._persist()
-            
-            logger.info(f"Indexed review history for PR #{pr.pr_number}")
+            logger.info(
+                f"Indexed {indexed_threads} discussion threads for PR #{pr.pr_number}"
+            )
             
         except Exception as e:
             logger.warning(f"Error indexing review history: {e}")
@@ -303,9 +344,9 @@ def _format_discussion(pr: PullRequest) -> str:
     if not getattr(pr, "discussion_comments", None):
         return "(no comments)"
 
-    comments = list(pr.discussion_comments)
-    by_parent: dict[Optional[int], list] = {}
-    by_id: dict[int, object] = {}
+    comments: list[PullRequestDiscussionComment] = list(pr.discussion_comments)
+    by_parent: dict[Optional[int], list[PullRequestDiscussionComment]] = {}
+    by_id: dict[int, PullRequestDiscussionComment] = {}
     for c in comments:
         by_id[c.comment_id] = c
         by_parent.setdefault(c.in_reply_to_id, []).append(c)
@@ -333,7 +374,7 @@ def _format_discussion(pr: PullRequest) -> str:
         return "\n".join(parts)
 
     # Top-level = no parent OR parent missing
-    top_level: list = []
+    top_level: list[PullRequestDiscussionComment] = []
     for c in by_parent.get(None, []):
         top_level.append(c)
     for parent_id, lst in by_parent.items():
@@ -342,7 +383,7 @@ def _format_discussion(pr: PullRequest) -> str:
 
     # Deduplicate while keeping order
     seen: set[int] = set()
-    ordered_top: list = []
+    ordered_top: list[PullRequestDiscussionComment] = []
     for c in top_level:
         if c.comment_id in seen:
             continue
@@ -350,3 +391,110 @@ def _format_discussion(pr: PullRequest) -> str:
         ordered_top.append(c)
 
     return "\n".join(fmt_one(c, indent=0) for c in ordered_top)
+
+
+def _truncate_for_embedding(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n\n[TRUNCATED]"
+
+
+def _format_full_diff(pr: PullRequest) -> str:
+    diff_text_parts: list[str] = []
+    for hunk in pr.diff_hunks:
+        diff_text_parts.append(f"### {hunk.file_path.value}\n{hunk.content}")
+    return "\n\n".join(diff_text_parts) or "(no diff hunks)"
+
+
+def _build_discussion_threads(
+    pr: PullRequest,
+) -> tuple[
+    dict[Optional[int], list[PullRequestDiscussionComment]],
+    list[PullRequestDiscussionComment],
+]:
+    """Return (by_parent, ordered_roots) for discussion comments."""
+    if not getattr(pr, "discussion_comments", None):
+        return {}, []
+
+    comments: list[PullRequestDiscussionComment] = list(pr.discussion_comments)
+    by_parent: dict[Optional[int], list[PullRequestDiscussionComment]] = {}
+    by_id: dict[int, PullRequestDiscussionComment] = {}
+    for c in comments:
+        by_id[c.comment_id] = c
+        by_parent.setdefault(c.in_reply_to_id, []).append(c)
+
+    for lst in by_parent.values():
+        lst.sort(key=lambda x: x.created_at)
+
+    top_level: list[PullRequestDiscussionComment] = []
+    for c in by_parent.get(None, []):
+        top_level.append(c)
+    for parent_id, lst in by_parent.items():
+        if parent_id is not None and parent_id not in by_id:
+            top_level.extend(lst)
+
+    seen: set[int] = set()
+    ordered_roots: list[PullRequestDiscussionComment] = []
+    for c in top_level:
+        if c.comment_id in seen:
+            continue
+        seen.add(c.comment_id)
+        ordered_roots.append(c)
+
+    return by_parent, ordered_roots
+
+
+def _format_thread(
+    root_comment: PullRequestDiscussionComment,
+    by_parent: dict[Optional[int], list[PullRequestDiscussionComment]],
+) -> str:
+    """Format a single thread (root + replies) as text."""
+
+    def fmt_one(c: PullRequestDiscussionComment, indent: int = 0) -> str:
+        prefix = "  " * indent
+        location = ""
+        if c.file_path and c.line_number:
+            location = f" ({c.file_path.value}:{c.line_number})"
+        elif c.file_path:
+            location = f" ({c.file_path.value})"
+
+        header = f"{prefix}- {c.author}{location}:"
+        body_lines = (c.body or "").splitlines() or [""]
+        body = "\n".join(f"{prefix}  {line}" for line in body_lines)
+
+        parts = [header, body]
+        replies = by_parent.get(c.comment_id, [])
+        for r in replies:
+            parts.append(fmt_one(r, indent=indent + 1))
+        return "\n".join(parts)
+
+    return fmt_one(root_comment, indent=0)
+
+
+def _format_diff_context_for_comment(
+    pr: PullRequest,
+    comment: PullRequestDiscussionComment,
+) -> str:
+    """Best-effort diff context for a comment's file/line."""
+    if not comment.file_path:
+        return "(no file context)"
+
+    hunks = pr.get_hunks_for_file(comment.file_path.value)
+    if not hunks:
+        return f"### {comment.file_path.value}\n(no diff hunks for file)"
+
+    selected = []
+    if comment.line_number is not None:
+        selected = [h for h in hunks if h.is_line_in_hunk(int(comment.line_number))]
+
+    if not selected:
+        selected = hunks[:2]
+
+    parts: list[str] = [f"### {comment.file_path.value}"]
+    for h in selected:
+        header = (
+            f"@@ -{h.old_start_line},{h.old_line_count} "
+            f"+{h.new_start_line},{h.new_line_count} @@"
+        )
+        parts.append(f"{header}\n{h.content}")
+    return "\n\n".join(parts)
