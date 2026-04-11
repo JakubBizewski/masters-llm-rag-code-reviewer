@@ -119,6 +119,19 @@ rag:
   architectural_docs:
     - "ARCHITECTURE.md"
     - "docs/adr/*.md"
+
+publish:
+  # Publikuj tylko warning/error (pomija info)
+  min_severity: "warning"
+  # Opcjonalnie wytnij konkretne reguły
+  exclude_rule_names:
+    - "style_hint"
+  # Opcjonalnie wytnij komentarze pasujące do regex
+  exclude_message_patterns:
+    - "more descriptive"
+    - "documentation|api contracts"
+  # Opcjonalnie pomijaj pozytywne/praise komentarze
+  exclude_positive_feedback: true
 ```
 
 ## Użycie

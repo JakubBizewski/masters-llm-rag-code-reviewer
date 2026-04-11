@@ -170,11 +170,36 @@ async def _review_async(
         # Publish if requested
         if publish:
             click.echo("\nPublishing comments to PR...")
+
+            # Apply publish policy from .acr-config.yml before sending comments.
+            pr_for_policy = await vcs_adapter.get_pull_request(
+                repo=repo,
+                pr_number=pr_number,
+            )
+            publish_policy_config = await config_loader.load_config(
+                repo=repo,
+                ref=pr_for_policy.target_branch,
+            )
+            filtered_comments = publish_policy_config.filter_comments_for_publication(
+                result.comments
+            )
+
+            if len(filtered_comments) != len(result.comments):
+                click.echo(
+                    f"Filtered comments for publication: {len(result.comments)} -> {len(filtered_comments)}"
+                )
+
+            if not filtered_comments:
+                click.echo("No comments matched publish policy; skipping publication.")
+                await vcs_adapter.close()
+                await ci_analyzer.close()
+                return
+
             publish_use_case = PublishReviewUseCase(vcs_repository=vcs_adapter)
             publish_request = ReviewPublishRequest(
                 repository=repo,
                 pr_number=pr_number,
-                comments=result.comments,
+                comments=filtered_comments,
             )
             success = await publish_use_case.execute(publish_request)
             

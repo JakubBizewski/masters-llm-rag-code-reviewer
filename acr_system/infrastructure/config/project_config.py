@@ -2,12 +2,15 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
+from acr_system.domain.entities.entities import ReviewComment
+
 from acr_system.domain.value_objects.value_objects import (
     FilePatternRule,
     ImpactAnalysisConfig,
     LLMConfig,
     RAGConfig,
     RuleSet,
+    Severity,
 )
 
 
@@ -21,6 +24,7 @@ class ProjectConfig:
     llm_config: LLMConfig = field(default_factory=LLMConfig)
     rag_config: RAGConfig = field(default_factory=RAGConfig)
     impact_analysis_config: ImpactAnalysisConfig = field(default_factory=ImpactAnalysisConfig)
+    publish_config: "PublishConfig" = field(default_factory=lambda: PublishConfig())
     
     def get_rules_for_file(self, file_path: str) -> Tuple[str, Optional[RAGConfig], LLMConfig]:
         """Get applicable rules, RAG config, and LLM config for a file.
@@ -65,3 +69,73 @@ class ProjectConfig:
         final_llm_config = llm_config_override or self.llm_config
         
         return rules_text, final_rag_config, final_llm_config
+
+    def filter_comments_for_publication(
+        self,
+        comments: List[ReviewComment],
+    ) -> List[ReviewComment]:
+        """Filter comments according to publication policy."""
+        return [c for c in comments if self.publish_config.should_publish(c)]
+
+
+@dataclass
+class PublishConfig:
+    """Policy controlling which comments are eligible for publication."""
+
+    min_severity: str = Severity.INFO
+    exclude_rule_names: List[str] = field(default_factory=list)
+    exclude_message_patterns: List[str] = field(default_factory=list)
+    exclude_positive_feedback: bool = False
+
+    def __post_init__(self) -> None:
+        valid = {Severity.INFO, Severity.WARNING, Severity.ERROR}
+        if self.min_severity not in valid:
+            raise ValueError(f"Invalid min_severity: {self.min_severity}")
+
+    def should_publish(self, comment: ReviewComment) -> bool:
+        """Return True if a comment should be published."""
+        import re
+
+        if _severity_priority(comment.severity.level) < _severity_priority(self.min_severity):
+            return False
+
+        if comment.rule_name and comment.rule_name in self.exclude_rule_names:
+            return False
+
+        message = comment.message or ""
+        for pattern in self.exclude_message_patterns:
+            try:
+                if re.search(pattern, message, re.IGNORECASE):
+                    return False
+            except re.error:
+                # Fall back to plain substring if invalid regex is provided.
+                if pattern.lower() in message.lower():
+                    return False
+
+        if self.exclude_positive_feedback and _looks_like_positive_feedback(message):
+            return False
+
+        return True
+
+
+def _severity_priority(level: str) -> int:
+    priorities = {
+        Severity.INFO: 1,
+        Severity.WARNING: 2,
+        Severity.ERROR: 3,
+    }
+    return priorities.get(level, 1)
+
+
+def _looks_like_positive_feedback(message: str) -> bool:
+    lowered = message.lower()
+    markers = (
+        "more descriptive",
+        "improving code clarity",
+        "improves code clarity",
+        "improves clarity",
+        "looks good",
+        "good addition",
+        "good change",
+    )
+    return any(m in lowered for m in markers)

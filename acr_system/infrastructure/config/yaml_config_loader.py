@@ -12,6 +12,7 @@ from acr_system.domain.value_objects.value_objects import (
     RuleSet,
 )
 from acr_system.infrastructure.config.project_config import ProjectConfig
+from acr_system.infrastructure.config.project_config import PublishConfig
 from acr_system.shared.exceptions.infrastructure_exceptions import ConfigLoadError
 from acr_system.shared.logging.logger import get_logger
 
@@ -133,6 +134,15 @@ class YAMLConfigLoader(ConfigRepository):
                 severity_threshold=impact_data.get("severity_threshold", "medium"),
                 exclude_patterns=tuple(impact_data.get("exclude_patterns", [])),
             )
+
+            # Parse publish config
+            publish_data = data.get("publish", {})
+            publish_config = PublishConfig(
+                min_severity=publish_data.get("min_severity", "info"),
+                exclude_rule_names=publish_data.get("exclude_rule_names", []),
+                exclude_message_patterns=publish_data.get("exclude_message_patterns", []),
+                exclude_positive_feedback=publish_data.get("exclude_positive_feedback", False),
+            )
             
             return ProjectConfig(
                 review_enabled=review_enabled,
@@ -141,6 +151,7 @@ class YAMLConfigLoader(ConfigRepository):
                 llm_config=llm_config,
                 rag_config=rag_config,
                 impact_analysis_config=impact_analysis_config,
+                publish_config=publish_config,
             )
             
         except Exception as e:
