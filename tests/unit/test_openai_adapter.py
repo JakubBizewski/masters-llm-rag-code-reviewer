@@ -2,7 +2,8 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from acr_system.domain.entities.entities import CIToolResult, ParsedCIIssue
+from acr_system.domain.entities.entities import CIToolResult, DiffHunk, ParsedCIIssue
+from acr_system.domain.value_objects.value_objects import FilePath
 from acr_system.infrastructure.llm.openai_adapter import OpenAIAdapter
 
 
@@ -350,3 +351,74 @@ Required minimum: 80%""",
             
             # Should handle gracefully and return empty list
             assert issues == []
+
+
+class TestOpenAIAdapterReviewParsing:
+        def test_parse_review_response_anchors_method_rename_to_definition_line(self, openai_adapter):
+                hunk = DiffHunk(
+                        file_path=FilePath("acr_system/domain/services/services.py"),
+                        old_start_line=35,
+                        old_line_count=8,
+                        new_start_line=35,
+                        new_line_count=10,
+                        content="""@@ -35,8 +35,10 @@
+ class ContextBuilder:
+         def helper(self):
+                 pass
+
+         async def build_full_context(self, diff_hunk, pr, rag_config=None):
+                 return []
+
+ usage = obj.build_full_context(diff_hunk, pr)
+ """,
+                )
+
+                response = """{
+    "comments": [
+        {
+            "line": 38,
+            "severity": "warning",
+            "message": "Method rename from 'build_context' to 'build_full_context' changed a public symbol and all call sites must use the new name."
+        }
+    ]
+}"""
+
+                comments = openai_adapter._parse_review_response(response, hunk)
+
+                assert len(comments) == 1
+                assert comments[0].line_number == 39
+
+        def test_parse_review_response_filters_speculative_comments(self, openai_adapter):
+                hunk = DiffHunk(
+                        file_path=FilePath("src/main.py"),
+                        old_start_line=1,
+                        old_line_count=1,
+                        new_start_line=1,
+                        new_line_count=4,
+                        content="""@@ -1,1 +1,4 @@
+def run():
+        value = 1 / 0
+        return value
+""",
+                )
+
+                response = """{
+    "comments": [
+        {
+            "line": 1,
+            "severity": "warning",
+            "message": "This appears to be risky and may break at runtime; requires verification."
+        },
+        {
+            "line": 2,
+            "severity": "error",
+            "message": "Division by zero is guaranteed at runtime on line 2."
+        }
+    ]
+}"""
+
+                comments = openai_adapter._parse_review_response(response, hunk)
+
+                assert len(comments) == 1
+                assert comments[0].severity.level == "error"
+                assert "Division by zero is guaranteed" in comments[0].message

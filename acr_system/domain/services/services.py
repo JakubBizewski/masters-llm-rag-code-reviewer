@@ -25,7 +25,10 @@ from acr_system.domain.value_objects.value_objects import (
     RAGConfig,
     Severity,
 )
+from acr_system.shared.logging.logger import get_logger
 
+
+logger = get_logger(__name__)
 
 class ContextBuilder:
     """Service for building context for LLM from RAG and other sources."""
@@ -83,6 +86,10 @@ class ContextBuilder:
         surrounding_context = await self._get_surrounding_context(diff_hunk, pr)
         if surrounding_context:
             context.append(surrounding_context)
+
+        logger.info(f"Built context with {len(context)} items for hunk in {diff_hunk.file_path.value}")
+        for c in context:
+            logger.info(f"Context item from {c.source} with relevance {c.relevance_score:.2f}: {c.content}...\n\n")
         
         return context
     

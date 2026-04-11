@@ -164,7 +164,7 @@ async def _review_async(
                 line_info = f"L{comment.line_number}" if comment.line_number else "general"
                 click.echo(
                     f"  [{click.style(comment.severity.level, fg=severity_color.get(comment.severity.level))}] "
-                    f"{comment.file_path} ({line_info}): {comment.message[:80]}..."
+                    f"{comment.file_path} ({line_info}): {comment.message}..."
                 )
         
         # Publish if requested

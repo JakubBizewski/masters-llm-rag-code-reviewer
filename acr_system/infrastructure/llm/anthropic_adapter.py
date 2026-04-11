@@ -182,6 +182,8 @@ Review the code changes and provide feedback in the following JSON format:
 }
 
 Only include comments for actual issues. If the code looks good, return an empty comments array.
+Comments must be evidence-based and verifiable from the diff/context/CI data.
+Do NOT include speculation, uncertainty, or style-only suggestions (forbidden phrases include: may, might, could, appears, seems, consider, requires verification, potential).
 Focus on: correctness, security, performance, maintainability, and adherence to the rules above.
 """
         
@@ -222,32 +224,33 @@ Focus on: correctness, security, performance, maintainability, and adherence to 
                     comment_data.get("severity", "info"),
                     Severity.INFO
                 )
-                
-                # Convert line number: LLM often returns relative line numbers (1, 2, 3...)
-                # within the diff, but GitHub needs absolute line numbers from the file
+
+                message = str(comment_data.get("message") or "")
+                if _is_non_factual_comment(message):
+                    logger.info("Skipping speculative/non-factual LLM comment")
+                    continue
+
                 raw_line = comment_data.get("line")
-                if raw_line is not None:
-                    # If line number is small (< new_start_line), treat as relative to hunk
-                    if raw_line < diff_hunk.new_start_line:
-                        absolute_line = diff_hunk.new_start_line + raw_line - 1
-                    else:
-                        absolute_line = raw_line
-                    
-                    # Validate line is within hunk range, otherwise make it a general comment
-                    if not diff_hunk.is_line_in_hunk(absolute_line):
-                        logger.warning(
-                            f"Line {raw_line} (absolute: {absolute_line}) outside hunk range "
-                            f"{diff_hunk.new_start_line}-{diff_hunk.new_start_line + diff_hunk.new_line_count - 1}"
-                        )
-                        absolute_line = None
-                else:
-                    absolute_line = None
+                absolute_line = _normalize_line_for_hunk(raw_line, diff_hunk)
+                if raw_line is not None and absolute_line is None:
+                    logger.warning(
+                        f"Line {raw_line} outside hunk range "
+                        f"{diff_hunk.new_start_line}-{diff_hunk.new_start_line + diff_hunk.new_line_count - 1}"
+                    )
+
+                anchored_line = _infer_definition_line_from_diff(
+                    diff_hunk=diff_hunk,
+                    message=message,
+                    current_line=absolute_line,
+                )
+                if anchored_line is not None:
+                    absolute_line = anchored_line
                 
                 comment = ReviewComment(
                     file_path=diff_hunk.file_path,
                     line_number=absolute_line,
                     severity=Severity(level=severity),
-                    message=comment_data["message"],
+                    message=message,
                     suggestion=comment_data.get("suggestion"),
                     rule_name="llm_review",
                 )
@@ -388,3 +391,120 @@ Focus on: correctness, security, performance, maintainability, and adherence to 
             
         except Exception as e:
             raise LLMProviderError(f"Anthropic API error: {e}") from e
+
+
+def _normalize_line_for_hunk(raw_line: object, diff_hunk: DiffHunk) -> Optional[int]:
+    if not isinstance(raw_line, int):
+        return None
+
+    if raw_line < diff_hunk.new_start_line:
+        absolute_line = diff_hunk.new_start_line + raw_line - 1
+    else:
+        absolute_line = raw_line
+
+    if not diff_hunk.is_line_in_hunk(absolute_line):
+        return None
+    return absolute_line
+
+
+def _infer_definition_line_from_diff(
+    diff_hunk: DiffHunk,
+    message: str,
+    current_line: Optional[int],
+) -> Optional[int]:
+    if not _is_definition_level_comment(message):
+        return None
+
+    candidates = _extract_definition_candidates(diff_hunk)
+    if not candidates:
+        return None
+
+    symbols = _extract_quoted_symbols(message)
+
+    def score(candidate: tuple[int, str]) -> tuple[int, int]:
+        line_no, code_line = candidate
+        points = 0
+        if symbols and any(sym in code_line for sym in symbols):
+            points += 6
+        if current_line is not None:
+            points += max(0, 3 - abs(line_no - current_line))
+        return points, -line_no
+
+    best_line, _ = max(candidates, key=score)
+    return best_line
+
+
+def _is_definition_level_comment(message: str) -> bool:
+    text = message.lower()
+    keywords = (
+        "method",
+        "function",
+        "public api",
+        "breaking change",
+        "rename",
+    )
+    return any(k in text for k in keywords)
+
+
+def _extract_quoted_symbols(message: str) -> set[str]:
+    import re
+
+    return {
+        m.group(1)
+        for m in re.finditer(r"'([A-Za-z_][A-Za-z0-9_]*)'", message)
+    }
+
+
+def _extract_definition_candidates(diff_hunk: DiffHunk) -> list[tuple[int, str]]:
+    import re
+
+    candidates: list[tuple[int, str]] = []
+    new_line = diff_hunk.new_start_line
+
+    for raw in diff_hunk.content.splitlines():
+        if raw.startswith("@@"):
+            match = re.search(r"\+(\d+)(?:,\d+)?", raw)
+            if match:
+                new_line = int(match.group(1))
+            continue
+
+        if raw.startswith("-"):
+            continue
+
+        if raw.startswith("+"):
+            code = raw[1:]
+        elif raw.startswith(" "):
+            code = raw[1:]
+        else:
+            code = raw
+
+        line_no = new_line
+        new_line += 1
+
+        stripped = code.lstrip()
+        if (
+            stripped.startswith("def ")
+            or stripped.startswith("async def ")
+            or stripped.startswith("class ")
+        ):
+            candidates.append((line_no, stripped))
+
+    return candidates
+
+
+def _is_non_factual_comment(message: str) -> bool:
+    text = message.lower()
+    markers = (
+        " may ",
+        " might ",
+        " could ",
+        " appears",
+        " seems",
+        " possibly",
+        " potential",
+        "requires verification",
+        "needs verification",
+        "consider ",
+    )
+    padded = f" {text} "
+    return any(m in padded for m in markers)

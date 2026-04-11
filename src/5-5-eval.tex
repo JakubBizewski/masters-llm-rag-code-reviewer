@@ -1,0 +1,72 @@
+\subsection{Sposoby oceny jakości automatycznego code review}
+\label{subsec:llm_acr_eval}
+
+Właściwe mierzenie skuteczności systemów do automatycznego przeglądu kodu jest problematyczną kwestią.
+Największym problemem jest to, że klasyczne miary używane do przetwarzania języka naturalnego rzadko kiedy
+oddają to, czy komentarz code review jest faktycznie przydatny technicznie \cite{Lin2025CodeReviewQA, Zhang2024SurveyLLMSE}.
+W publikacjach widać trzy główne podejścia do ocen: metryki ilościowe, badania jakościowe z użyciem programistów oraz
+gotowe benchmarki badawcze.
+
+\paragraph{Metryki ilościowe i ich ograniczenia}
+W zadaniach typu \textit{code-to-comment} czy przy automatycznych poprawkach (\textit{code refinement}), badacze zazwyczaj sięgają po 
+metryki leksykalne - mowa tu głównie o BLEU-4, ROUGE-L oraz METEOR \cite{Lin2025CodeReviewQA, Meng2025RARe, Yu2024Carllm}. 
+Mimo ich powszechnego użycia, wiarygodność tych miar jest coraz częściej podważana w nowszych pracach:
+
+\begin{itemize}
+    \item \textbf{Krytyka Exact Match (EM):} Ta metryka bywa oceniana jako zbyt restrykcyjna, 
+zwłaszcza w zadaniach, gdzie liczy się sens, a nie identyczne brzmienie. 
+W pracy Tufano \cite{Tufano2024CodeReviewAutomation} ręczna analiza pokazała, że nawet 21,83\% predykcji odrzuconych przez 
+EM w zadaniu generowania komentarzy było jednak semantycznie poprawnych. To dość mocno sugeruje, że samo EM może 
+"karać" poprawne odpowiedzi tylko dlatego, że są sformułowane inaczej. 
+W pracy Pornprasit \cite{Pornprasit2024FineTuningPromptingCR} pojawia się podobny wniosek, gdzie zwraca się uwagę, że 
+EM może zaniżać realne możliwości modeli w porównaniu z oceną ludzką (która jest bardziej elastyczna).
+    
+    \item \textbf{BERTScore:} Jest to podejście oparte o aspekt kontekstowy, więc zamiast patrzeć 
+na identyczność tokenów, próbuje uchwycić podobieństwo znaczenia. Dla komentarzy do code review ma to sens, bo pozwala lepiej 
+oddać intencję recenzenta niż proste dopasowanie słów, co podkreślają autorzy pracy Haider \cite{Haider2024PromptingFineTuningRCG}.
+    
+    \item \textbf{Desiredness Score (DS):} Opiera się na różnicy \textit{perplexity} modelu.
+Zamysł jest taki, że mierzy się, na ile dany komentarz zmniejsza niepewność modelu przy generowaniu poprawnej wersji kodu.
+Dzięki temu da się automatycznie wyłapywać tzw. \textit{Desired Review Comments} (DRC), czyli takie uwagi, które faktycznie prowadzą do 
+napraw, a nie tylko "brzmią sensownie" \cite{Yu2025Desiview}.
+    
+    \item \textbf{Wskaźniki poprawności technicznej:} Coraz częściej podkreśla się potrzebę mierzenia nie tylko 
+jakości językowej komentarzy, ale też efektu w kodzie. W szczególności istotne są \textit{Correction Ratio} (czy poprawki realnie działają)
+oraz \textit{Regression Ratio}, które opisuje ryzyko, że sugestia modelu popsuje wcześniej poprawny
+kod \cite{Cihan2025EvaluatingLLMsForCodeReview}. To jest o tyle ważne, że nawet "ładna" uwaga w code review nie ma wartości,
+jeśli w praktyce prowadzi do regresji.
+\end{itemize}
+
+\paragraph{Oceny eksperckie i badania użyteczności}
+Podczas typowego wdrożenia przemysłowego automatyczne metrki to z reguły za mało, więc dalej kluczową rolę w procesach
+code review odgrywa przegląd przez doświadczonego programistę \cite{Ramesh2025EricssonExperience}. 
+W nowych badaniach dodatkowo zaczęto odchodzić od ogólnych ocen na rzecz wielowymiarowych skal.
+W takim podejściu zwraca się uwagę na trafność (\textit{relevance}), czyli to, czy dany komentarz w 
+ogóle odnosi się do właściwego fragmentu kodu i czy poprawnie wskazuje źródło problemu \cite{Yu2024Carllm, Ren2025HydraReviewer}.
+Kolejnym jest użyteczność (\textit{actionability}) - czy sugestia jest na tyle konkretna, żeby programista wiedział, jak ma wprowadzić poprawkę.
+Jest to o tyle istotne, że według badań Ren \cite{Ren2025HydraReviewer} aż 61,0\% uwag generowanych przez tradycyjne metody 
+jest ocenianych jako zbyt ogólnikowe (\textit{vagueness}), co czyni je bezużytecznymi.
+Ponad to jest kwestia zrozumiałości (\textit{comprehensibility}) - czy wyjaśnienie błędu jest jasne dla człowieka i
+czy model, generując odpowiedź, zachował logiczny ciąg rozumowania, co często wiąże się z zastosowaniem
+techniki \textit{Chain-of-Thought} \cite{Yu2024Carllm, Haider2024PromptingFineTuningRCG}.
+
+Istnieje także podejście \textit{LLM-as-a-judge}. Jest to wykorzystanie zaawansowanych i większych modeli do oceny
+wyników pracy mniejszych systemów. Wyniki takich eksperymentów wyglądają obiecująco — w pracy Jaoua \cite{Jaoua2025LLMStaticAnalyzersCR} wykazano, 
+że taka automatyczna ocena wykazuje dość wysoką zgodność z opiniami ludzi, osiągając współczynnik \textit{Cohen's 
+kappa} na poziomie 0,72.
+
+\paragraph{Benchmarki i dekompozycja zadań}
+Przegląd kodu co raz rzadziej jest traktowany jako jedno, monolityczne zadanie. Częściej 
+rozbija się je na etapy odpowiadające kolejnym krokom rozumowania. Przykładem jest benchmark \textit{CodeReviewQA}, w 
+którym sprawdza się działanie modelu w trzech krokach \cite{Lin2025CodeReviewQA}:
+\begin{enumerate}
+    \item \textbf{CTR (\textit{Change Type Recognition}):} rozpoznanie, jaki typ zmiany jest potrzebny.
+    \item \textbf{CL (\textit{Change Localisation}):} wskazanie konkretnych linii kodu, których dotyczy problem. W 
+praktyce to właśnie lokalizacja bywa najczęstszym "wąskim gardłem" dla modeli LLM \cite{Lin2025CodeReviewQA}.
+    \item \textbf{SI (\textit{Solution Identification}):} wybór właściwej poprawki spośród dostępnych alternatyw.
+\end{enumerate}
+
+Trzeba dodatkowo brać pod uwagę problemy metodologiczne. Dane historyczne 
+potrafią być zaszumione: w popularnych zbiorach szum szacuje się na około 25\% rekordów \cite{Tufano2024CodeReviewAutomation}.
+Istnieje ryzyko \textit{data leakage} (wycieku danych), które w zadaniach naprawy kodu 
+potrafi zawyżać wyniki o ponad 30 punktów procentowych \cite{Germano2025VulnSLR}.

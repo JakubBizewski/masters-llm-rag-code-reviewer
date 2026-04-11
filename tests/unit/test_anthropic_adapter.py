@@ -115,7 +115,7 @@ class TestAnthropicAdapter:
     {
       "line": 14,
       "severity": "warning",
-      "message": "Consider using custom exception class",
+            "message": "The code raises a generic ValueError on invalid arguments.",
       "suggestion": "raise InvalidArgumentError(\\"Arguments must be integers\\")"
     }
   ]
@@ -140,7 +140,7 @@ class TestAnthropicAdapter:
         
         assert comments[1].line_number == 14
         assert comments[1].severity.level == Severity.WARNING
-        assert "custom exception" in comments[1].message
+        assert "generic ValueError" in comments[1].message
     
     @pytest.mark.asyncio
     async def test_generate_review_comments_with_context(
@@ -405,13 +405,13 @@ class TestAnthropicAdapter:
 
 ```json
 {
-  "comments": [
-    {
-      "line": 15,
-      "severity": "warning",
-      "message": "Consider refactoring"
-    }
-  ]
+    "comments": [
+        {
+            "line": 15,
+            "severity": "warning",
+            "message": "The same validation condition is duplicated in this hunk."
+        }
+    ]
 }
 ```
 
@@ -457,3 +457,79 @@ Hope this helps!"""
         comments = anthropic_adapter._parse_review_response(response, sample_diff_hunk)
         
         assert comments == []
+
+        def test_parse_review_response_anchors_method_rename_to_definition_line(
+                self,
+                anthropic_adapter,
+        ):
+                """Method/API rename comments should point to function definition line."""
+                hunk = DiffHunk(
+                        file_path=FilePath("acr_system/domain/services/services.py"),
+                        old_start_line=35,
+                        old_line_count=8,
+                        new_start_line=35,
+                        new_line_count=10,
+                        content="""@@ -35,8 +35,10 @@
+ class ContextBuilder:
+         def helper(self):
+                 pass
+
+         async def build_full_context(self, diff_hunk, pr, rag_config=None):
+                 return []
+
+ usage = obj.build_full_context(diff_hunk, pr)
+ """,
+                )
+
+                response = """{
+    "comments": [
+        {
+            "line": 38,
+            "severity": "warning",
+            "message": "This appears to be a breaking change to a public API method rename from 'build_context' to 'build_full_context'."
+        }
+    ]
+}"""
+
+                comments = anthropic_adapter._parse_review_response(response, hunk)
+
+                assert len(comments) == 1
+                assert comments[0].line_number == 39
+
+        def test_parse_review_response_filters_speculative_comments(
+                self,
+                anthropic_adapter,
+        ):
+                hunk = DiffHunk(
+                        file_path=FilePath("src/main.py"),
+                        old_start_line=1,
+                        old_line_count=1,
+                        new_start_line=1,
+                        new_line_count=4,
+                        content="""@@ -1,1 +1,4 @@
+def run():
+        value = 1 / 0
+        return value
+""",
+                )
+
+                response = """{
+    "comments": [
+        {
+            "line": 1,
+            "severity": "warning",
+            "message": "This appears to be risky and may break at runtime; consider verifying behavior."
+        },
+        {
+            "line": 2,
+            "severity": "error",
+            "message": "Division by zero is guaranteed at runtime on line 2."
+        }
+    ]
+}"""
+
+                comments = anthropic_adapter._parse_review_response(response, hunk)
+
+                assert len(comments) == 1
+                assert comments[0].severity.level == "error"
+                assert "Division by zero is guaranteed" in comments[0].message
