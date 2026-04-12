@@ -1,5 +1,6 @@
 """Domain services for orchestrating code review."""
 import asyncio
+import os
 from typing import List, Optional
 
 from acr_system.ast.parser import ASTParser
@@ -40,6 +41,8 @@ class ContextBuilder:
     ):
         self.embedding_store = embedding_store
         self.vcs_repository = vcs_repository
+        # Bigger default context window to reduce missing nearby signals.
+        self.surrounding_lines = max(10, int(os.getenv("RAG_SURROUNDING_LINES", "200")))
     
     async def build_context(
         self,
@@ -114,17 +117,23 @@ class ContextBuilder:
     ) -> Optional[CodeContext]:
         """Get surrounding code context for a diff hunk."""
         try:
-            # Get full file content from target branch
+            # Get full file content from the branch/commit being reviewed.
+            # Using target branch can return stale code and mismatched line context.
+            ref = pr.head_sha or pr.source_branch
             file_content = await self.vcs_repository.get_file_content(
                 repo=pr.repository,
                 file_path=diff_hunk.file_path.value,
-                ref=pr.target_branch,
+                ref=ref,
             )
             
-            # Extract relevant portion (few lines before and after)
+            # Extract relevant portion (wider window before and after the hunk)
             lines = file_content.split('\n')
-            start = max(0, diff_hunk.new_start_line - 10)
-            end = min(len(lines), diff_hunk.new_start_line + diff_hunk.new_line_count + 10)
+            window = self.surrounding_lines
+            start = max(0, diff_hunk.new_start_line - window)
+            end = min(
+                len(lines),
+                diff_hunk.new_start_line + diff_hunk.new_line_count + window,
+            )
             
             context_lines = lines[start:end]
             context_content = '\n'.join(context_lines)

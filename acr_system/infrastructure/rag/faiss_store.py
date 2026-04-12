@@ -257,6 +257,7 @@ class FAISSStore(EmbeddingStore):
         """
         try:
             self._initialize_index()
+            existing_keys = _existing_unique_keys(self.documents)
 
             by_parent, roots = _build_discussion_threads(pr)
 
@@ -270,6 +271,18 @@ class FAISSStore(EmbeddingStore):
             )
 
             if not roots:
+                unique_key = _make_unique_key(
+                    repo=pr.repository,
+                    pr_number=pr.pr_number,
+                    kind="diff",
+                    identifier="no-discussion",
+                )
+                if unique_key in existing_keys:
+                    logger.info(
+                        f"Skipping diff-only history for PR #{pr.pr_number}; already indexed"
+                    )
+                    return
+
                 diff_text = _format_full_diff(pr)
                 content = (
                     f"{common_header}\n"
@@ -285,6 +298,7 @@ class FAISSStore(EmbeddingStore):
                     "source": "pr_history_diff",
                     "repo": pr.repository,
                     "pr_number": str(pr.pr_number),
+                    "unique_key": unique_key,
                 })
 
                 self._persist()
@@ -294,7 +308,18 @@ class FAISSStore(EmbeddingStore):
                 return
 
             indexed_threads = 0
+            skipped_threads = 0
             for root in roots:
+                unique_key = _make_unique_key(
+                    repo=pr.repository,
+                    pr_number=pr.pr_number,
+                    kind="comment_thread",
+                    identifier=str(root.comment_id),
+                )
+                if unique_key in existing_keys:
+                    skipped_threads += 1
+                    continue
+
                 diff_context = _format_diff_context_for_comment(pr, root)
                 thread_text = _format_thread(root, by_parent)
 
@@ -324,15 +349,19 @@ class FAISSStore(EmbeddingStore):
                     "file_path": root.file_path.value if root.file_path else None,
                     "line_number": str(root.line_number) if root.line_number else None,
                     "url": getattr(root, "url", None),
+                    "unique_key": unique_key,
                 })
+                existing_keys.add(unique_key)
                 indexed_threads += 1
                 logger.info(
                     f"Indexed discussion thread for comment #{root.comment_id} in PR #{pr.pr_number}"
                 )
 
-            self._persist()
+            if indexed_threads > 0:
+                self._persist()
             logger.info(
-                f"Indexed {indexed_threads} discussion threads for PR #{pr.pr_number}"
+                f"Indexed {indexed_threads} discussion threads for PR #{pr.pr_number} "
+                f"(skipped duplicates: {skipped_threads})"
             )
             
         except Exception as e:
@@ -391,6 +420,40 @@ def _format_discussion(pr: PullRequest) -> str:
         ordered_top.append(c)
 
     return "\n".join(fmt_one(c, indent=0) for c in ordered_top)
+
+
+def _make_unique_key(repo: str, pr_number: int, kind: str, identifier: str) -> str:
+    return f"{repo}::pr:{pr_number}::{kind}:{identifier}"
+
+
+def _existing_unique_keys(documents: list[dict]) -> set[str]:
+    keys: set[str] = set()
+    for doc in documents:
+        key = doc.get("unique_key")
+        if isinstance(key, str) and key:
+            keys.add(key)
+            continue
+
+        # Backward compatibility for older persisted metadata without unique_key
+        source = doc.get("source")
+        repo = doc.get("repo")
+        pr_number = doc.get("pr_number")
+        if not (isinstance(repo, str) and isinstance(pr_number, str)):
+            continue
+
+        try:
+            pr_number_int = int(pr_number)
+        except ValueError:
+            continue
+
+        if source == "pr_history_diff":
+            keys.add(_make_unique_key(repo, pr_number_int, "diff", "no-discussion"))
+        elif source == "pr_history_comment_thread":
+            comment_id = doc.get("comment_id")
+            if isinstance(comment_id, str) and comment_id:
+                keys.add(_make_unique_key(repo, pr_number_int, "comment_thread", comment_id))
+
+    return keys
 
 
 def _truncate_for_embedding(text: str, max_chars: int) -> str:

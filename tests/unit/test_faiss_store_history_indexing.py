@@ -135,3 +135,64 @@ async def test_index_review_history_indexes_one_document_per_thread(monkeypatch,
 
     assert by_comment_id["3"]["source"] == "pr_history_comment_thread"
     assert "Another root" in by_comment_id["3"]["content"]
+
+
+@pytest.mark.asyncio
+async def test_index_review_history_is_idempotent_for_same_pr(monkeypatch, tmp_path):
+    monkeypatch.setattr(faiss_store, "FAISS_AVAILABLE", True)
+    monkeypatch.setattr(
+        faiss_store,
+        "faiss",
+        SimpleNamespace(IndexFlatL2=_FakeIndexFlatL2, write_index=lambda *a, **k: None),
+    )
+    monkeypatch.setattr(faiss_store, "np", _FakeNP())
+    monkeypatch.setattr(FAISSStore, "_load_if_exists", lambda self: None)
+    monkeypatch.setattr(FAISSStore, "_persist", lambda self: None)
+
+    store = FAISSStore(storage_path=str(tmp_path))
+    store._embedding_model = _FakeEmbeddingModel(dim=3)
+    store.dimension = 3
+
+    pr = PullRequest(
+        pr_number=7,
+        repository="owner/repo",
+        title="Idempotency PR",
+        description="",
+        author="alice",
+        source_branch="feature",
+        target_branch="main",
+    )
+    pr.add_diff_hunk(
+        DiffHunk(
+            file_path=FilePath("a.py"),
+            old_start_line=1,
+            old_line_count=1,
+            new_start_line=20,
+            new_line_count=4,
+            content="@@ -1,1 +20,4 @@\n+print('x')\n",
+        )
+    )
+    t0 = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    pr.discussion_comments = [
+        PullRequestDiscussionComment(
+            comment_id=11,
+            author="bob",
+            body="Root",
+            created_at=t0,
+            file_path=FilePath("a.py"),
+            line_number=21,
+            in_reply_to_id=None,
+        )
+    ]
+
+    await store.index_review_history(pr)
+    first_vectors = store.index.ntotal if store.index is not None else 0
+    first_docs = len(store.documents)
+    first_embeds = store.stats["embedding_texts"]
+
+    await store.index_review_history(pr)
+
+    assert store.index is not None
+    assert store.index.ntotal == first_vectors
+    assert len(store.documents) == first_docs
+    assert store.stats["embedding_texts"] == first_embeds
