@@ -15,6 +15,9 @@ def get_logger(name: str, level: Optional[str] = None) -> logging.Logger:
         Configured logger instance
     """
     logger = logging.getLogger(name)
+    # Prevent duplicate output when root logger is also configured
+    # (e.g. via configure_logging in CLI/API entrypoints).
+    logger.propagate = False
     
     # Set level
     if level:
