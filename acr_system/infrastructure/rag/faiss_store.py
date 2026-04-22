@@ -207,6 +207,24 @@ class FAISSStore(EmbeddingStore):
             # Over-fetch so we can apply metadata filters after ANN search
             search_k = min(max(requested_k * 5, requested_k), int(self.index.ntotal))
 
+            source_filter = None
+            exclude_pr_number = None
+            simple_filters: dict[str, str] = {}
+            if filters:
+                source_filter = filters.get("source")
+                exclude_pr_number = filters.get("exclude_pr_number") or filters.get(
+                    "exclude_pr_number_if_thread_exists"
+                )
+                simple_filters = {
+                    k: v
+                    for k, v in filters.items()
+                    if k not in {
+                        "source",
+                        "exclude_pr_number",
+                        "exclude_pr_number_if_thread_exists",
+                    }
+                }
+
             # Search FAISS index
             distances, indices = self.index.search(
                 np.array([query_embedding], dtype=np.float32),  # type: ignore
@@ -219,10 +237,20 @@ class FAISSStore(EmbeddingStore):
                 if idx < len(self.documents):
                     doc = self.documents[idx]
 
-                    if filters:
-                        matches = all(doc.get(k) == v for k, v in filters.items())
+                    if source_filter:
+                        if source_filter == "pr_history":
+                            if not str(doc.get("source", "")).startswith("pr_history"):
+                                continue
+                        elif doc.get("source") != source_filter:
+                            continue
+
+                    if simple_filters:
+                        matches = all(doc.get(k) == v for k, v in simple_filters.items())
                         if not matches:
                             continue
+
+                    if exclude_pr_number and doc.get("pr_number") == exclude_pr_number:
+                        continue
                     
                     # Convert L2 distance to similarity score (0-1)
                     # Lower distance = higher similarity

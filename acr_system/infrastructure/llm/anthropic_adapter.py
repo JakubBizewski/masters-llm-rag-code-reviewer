@@ -139,6 +139,7 @@ class AnthropicAdapter(LLMProvider):
         ci_issues: List[ParsedCIIssue],
     ) -> str:
         """Build prompt for code review."""
+        line_map = _build_new_side_line_map(diff_hunk)
         prompt = f"""# Code Review Task
 
 ## File: {diff_hunk.file_path.value}
@@ -150,6 +151,18 @@ Language: {diff_hunk.language.name}
 ## Code Changes (Unified Diff)
 ```
 {diff_hunk.content}
+```
+
+## Line Anchoring
+- Valid comment line range for this hunk: {diff_hunk.new_start_line}-{diff_hunk.new_start_line + diff_hunk.new_line_count - 1}
+- The `line` field must be an absolute line number in the NEW file.
+- Anchor each comment to the most relevant changed line in this hunk (prefer `+` lines in the unified diff).
+- Do not use line numbers from surrounding_code when they are outside this hunk range.
+
+## Changed Line Map (NEW file)
+Use only line numbers from this map when filling `line`.
+```
+{line_map}
 ```
 
 """
@@ -184,7 +197,15 @@ Review the code changes and provide feedback in the following JSON format:
 Only include comments for actual issues. If the code looks good, return an empty comments array.
 Comments must be evidence-based and verifiable from the diff/context/CI data.
 Do NOT include speculation, uncertainty, or style-only suggestions (forbidden phrases include: may, might, could, appears, seems, consider, requires verification, potential).
+Evidence hierarchy (most reliable to least): surrounding_code, Unified Diff, CI issues, PR history context.
+When sources conflict, follow the higher-priority source and do not report issues contradicted by it.
+Only report missing import/symbol issues when the absence is confirmed in surrounding_code.
 Focus on: correctness, security, performance, maintainability, and adherence to the rules above.
+If exact line is ambiguous, choose the nearest changed line within the valid hunk range.
+Anchor by issue type:
+- Type-hint/type-annotation issues -> function signature/annotation line.
+- API/rename/behavioral issues -> definition line of affected symbol.
+- Avoid anchoring to multiline string/query bodies unless the issue is specifically about that string/query content.
 """
         
         return prompt
@@ -508,3 +529,34 @@ def _is_non_factual_comment(message: str) -> bool:
     )
     padded = f" {text} "
     return any(m in padded for m in markers)
+
+
+def _build_new_side_line_map(diff_hunk: DiffHunk, max_lines: int = 120) -> str:
+    import re
+
+    lines: list[str] = []
+    new_line = diff_hunk.new_start_line
+
+    for raw in diff_hunk.content.splitlines():
+        if raw.startswith("@@"):
+            match = re.search(r"\+(\d+)(?:,\d+)?", raw)
+            if match:
+                new_line = int(match.group(1))
+            continue
+
+        if raw.startswith("-"):
+            continue
+
+        if raw.startswith("+") or raw.startswith(" "):
+            code = raw[1:]
+        else:
+            code = raw
+
+        lines.append(f"{new_line}: {code}")
+        new_line += 1
+
+        if len(lines) >= max_lines:
+            lines.append("...")
+            break
+
+    return "\n".join(lines) if lines else "(no lines available)"

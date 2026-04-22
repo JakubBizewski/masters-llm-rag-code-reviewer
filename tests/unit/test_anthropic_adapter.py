@@ -533,3 +533,4 @@ def run():
                 assert len(comments) == 1
                 assert comments[0].severity.level == "error"
                 assert "Division by zero is guaranteed" in comments[0].message
+

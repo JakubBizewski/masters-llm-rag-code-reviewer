@@ -1,0 +1,92 @@
+\section{Klasyczny proces code review i jego ograniczenia}
+\label{section:classic-code-review}
+
+Proces code review (przegląd kodu) jest jedną z najczęściej stosowanych metod kontroli jakości kodu w inżynierii oprogramowania.
+Aktualnie proces ten ma charakter asynchroniczny, narzędziowy i osadzony jest w trybie pracy opartym o 
+systemy kontroli wersji, zdalne repozytoria kodu i mechanizmy Pull/Merge Request \cite{bacchelli2013}.
+W przeciwieństwie do starszego podejścia zawartego w formalnej inspekcji jakościowej, współczesne code review rzadko opiera się na
+sztywnych listach kontrolnych i z góry zaplanowanych spotkaniach, lecz najczęściej jest lekkim i iteracyjnym procesem.
+Najnowsze podejście skupia się na wymianie komentarzy pomiędzy autorem a recenzentami \cite{bacchelli2013, badampudi2023}.
+
+\subsubsection*{Typowy przebieg code review}
+W klasycznym procesie opartym o Pull/Merge Request można wyróżnić następujące kroki:
+\begin{enumerate}
+    \item \textbf{Przygotowanie zmiany} przez autora obejmujące kod oraz utworzenie zgłoszenia PR/MR wraz z opisem celu i zakresu zmian.
+    \item \textbf{Dobór recenzentów} (manualnie lub z użyciem mechanizmów platformy do kontroli wersji), często w oparciu o znajomość modułu lub odpowiedzialność za dany komponent.
+    \item \textbf{Analiza zmian} przez recenzenta, najczęściej w widoku różnic (\emph{diff}), połączona z oceną poprawności, utrzymywalności i zgodności ze standardami projektu.
+    \item \textbf{Wymiana informacji zwrotnej} w formie komentarzy, prowadząca do poprawek po stronie autora.
+    \item \textbf{Iteracja} (kolejne rewizje) aż do spełnienia wymagań jakościowych i uzyskania akceptacji.
+    \item \textbf{Decyzja o integracji} (merge) lub odrzuceniu zmiany.
+\end{enumerate}
+Taki model wspiera pracę opartą na modelu rozproszonym, asynchronicznym i skupionym na kolaboracji. Proces pozostawia również 
+twardy ślad audytowy w repozytorium. W praktyce jednak skuteczność uzależniona jest od dostępności i kompetencji recenzentów \cite{badampudi2023}.
+
+\subsubsection*{Cele i rzeczywiste efekty przeglądów}
+Głównymi motywacjami stojącymi za wprowadzeniem przeglądu kodu do procesu wytwarzania oprogramowania są: wykrywanie defektów,
+zwiększenie zdolności do długoterminowego utrzymania kodu, w tym jakości, zgodności ze standardami czy redukcja długu
+technologicznego. Istotny jest także transfer wiedzy w zespole \cite{bacchelli2013, kononenko2016}.
+Badania wykazują jednak, że nie zawsze cele procesu przekładają się na rezultaty.
+Bacchelli i Bird przeanalizowali 570 komentarzy z 200 wątków przeglądu kodu w środowisku przemysłowym, na podstawie czego
+wynikło, że dominującymi komentarzami są uwagi na temat usprawnienia kodu (\emph{code improvements}) stanowiące 29\% 
+komentarzy, natomiast defekty (\emph{defects}) w kodzie odpowiadały za 14\% wypowiedzi \cite{bacchelli2013}.
+Obserwacje Czerwonki i in. kreują podobny obraz, gdzie jedynie ok. 15\% komentarzy wskazuje na potencjalny defekt,
+a co najmniej ok. 50\% dotyczy kwestii utrzymania (\emph{maintainability}) \cite{czerwonka2015}.
+Wyniki te sumarycznie sugerują, że wartość dodana z procesu code review nie ogranicza się jedynie do "łapania błędów",
+lecz obejmuje także doskonalenie jakości technicznej.
+
+\subsubsection*{Ograniczenia procesu: koszt czasowy i wąskie gardła}
+Wąskim gardłem najczęściej jest koszt związany z koniecznością zaangażowania ludzi.
+Oznacza to, że nie tylko konieczne jest poświęcenie czasu na przygotowanie zmian, lecz też na analizę cudzych zmian oraz
+krytyczne opisanie znalezionych problemów. Powoduje to dodatkowe opóźnienia w przepływie pracy spowodowane oczekiwaniem na recenzję.
+Przeglądając dane pochodzące z organizacji przemysłowych, zauważyć można statystykę, że programiści spędzają średnio około
+6 godzin tygodniowo na przeglądanie zmian innych osób, a mediana czasu od prośby o przegląd kodu do uzyskania pełnej akceptacji
+wynosi około 24 godziny \cite{czerwonka2015}.
+W organizacjach stosujących krótkie iteracje i wysoką częstotliwość wydawania (jak w metodyce Agile), code review staje się
+naturalnym wąskim gardłem.
+
+Czas trwania przeglądu kodu jest silnie powiązany z wielkością zmian i złożonością.
+Kononenko i in. pokazali, że kwestia rozmiaru oceniana jest przez praktyków jako kluczowa, wpływ \emph{patch size} na czas
+review uzyskał 100\% odpowiedzi pozytywnych, a liczba modyfikowanych plików i fragmentów (\emph{code chunks}) po 95\% \cite{kononenko2016}.
+Zauważyć można, że duże zmiany pogarszają także jakość przeglądu: recenzentom trudniej utrzymać uwagę i spójny
+obraz całości, a to zwiększa szansę na większą powierzchowność uwag i skupienie się na detalach \cite{kononenko2016}.
+
+\subsubsection*{Ograniczenia poznawcze i problem kontekstu}
+Najistotniejszym problemem klasycznego code review jest ograniczony dostęp do kontekstu, w którym zmiany
+są wprowadzane. Bacchelli i Bird trafnie pokazują, że poprawne zrozumienie kodu i zmiany stanowi główny koszt przeglądu, a
+cały proces trwa istotnie znacznie dłużej dla plików których recenzent nie zna (91\% odpowiedzi w ankiecie potwierdza tę zależność) \cite{bacchelli2013}.
+82\% respondentów wskazało, że "właściciele" komponentów (osoby najbardziej zaznajomione) dostarczają znacznie bardziej
+wartościowych komentarzy \cite{bacchelli2013}.
+Wynika z tego, że jakość przeglądu kodu silnie powiązana jest z wiedzą domenową i historią pracy w danym module projektu.
+
+Ilościowe znaczenie znajomości kontekstu zbadał Czerwonka i in. - bez wcześniejszej styczności
+z danym fragmentem kodu jedynie ok. 33\% komentarzy było uznane za użyteczne przez autora zmian, natomiast przy kolejnym
+review tego fragmentu, użyteczność wzrosła do 67\% \cite{czerwonka2015}. Oznacza to w praktyce, że w klasycznym
+przeglądzie kodu ciężko zapewnić stałą jakość review w sytuacji rotacji w zespole, dużego repozytorium lub częstych zmian
+architektonicznych. Istniejące narzędzia MR/PR wspomagają analizę różnic w kodzie, lecz nie dostarczają
+informacji potrzebnych do oceny wpływu zmian na całość projektu (np. powiązania z dokumentacją i architekturą,
+komplet odwołań czy wywołań, historia wcześniejszych decyzji) \cite{bacchelli2013, kononenko2016}.
+
+\subsubsection*{Zmienność jakości i subiektywność informacji zwrotnej}
+Badacze wskazują zmienną jakość komentarzy i wyników procesu jako kolejne ograniczenie klasycznego przeglądu kodu.
+Kononenko i in. podczas analizy perspektywy programistów, wskazali, że jakość code review głównie kojarzona jest z treściwością
+i dokładnością komentarzy, znajomością kodu przez recenzenta oraz postrzeganą jakością samej zmiany \cite{kononenko2016}.
+Oznacza to, że code review nie jest tylko procesem technicznym, lecz posiada także istotny aspekt komunikacyjny.
+Znaczenie ma styl wypowiedzi oraz priorytety i doświadczenie recenzenta. Nawet w obrębie jednego zespołu,
+mogą występować istotne różnice w tym, jakie problemy są identyfikowane, jak formułowane są sugestie oraz jak bardzo
+rygorystycznie wymuszane są standardy i dobre praktyki.
+
+Z punktu widzenia organizacji, występować może ryzyko, że przegląd kodu będzie nadmiernie skupiał się na powierzchownych
+aspektach (np. formatowanie kodu, drobne konwencje), podczas gdy defekty w skali makro (projektowe lub architektoniczne)
+pozostają niewykryte \cite{bacchelli2013, czerwonka2015}.
+Badampudi i in. w przeglądzie literatury pokazują, że część badań nad nowoczesnym przeglądem kodu ma ograniczoną trafność
+praktyczną - spośród 244 przeanalizowanych prac, zaledwie 14\% osiągnęło zarówno wysoką rzetelność i praktyczność,
+a wiele badań opiera się na środowiskach open-source (59\%) \cite{badampudi2023}.
+Pokazuje to istnienie luki pomiędzy wynikami badań a realnymi potrzebami zespołów programistycznych w środowiskach produkcyjnych.
+
+\subsubsection*{Implikacje: potrzeba wsparcia i częściowej automatyzacji}
+Klasyczny przegląd kodu oferuje istotne korzyści jakościowe, jednak nie jest pozbawiony wad. Obarczony jest
+istotnym kosztem czasowym, zależnością od dostępności i doświadczenia recenzentów oraz trudnością w szybkim pozyskaniu
+potrzebnego kontekstu do oceny zmian. Badania wskazują, że code review rzadko koncentruje się wyłącznie na
+wykrywaniu defektów a dużą część wartości stanowią uwagi dotyczące utrzymania kodu i jakości technicznej  \cite{bacchelli2013, czerwonka2015}.
+Widoczne ograniczenia uzasadniają potrzebę odnalezienia rozwiązań integrujących narzędzia automatyczne, szczególnie takie, które
+potrafią generować komentarze w języku naturalnym i uwzględniać cały kontekst projektowy.

@@ -1,0 +1,63 @@
+\subsection{Ewaluacja, ograniczenia i luki badawcze w automatycznym code review z użyciem LLM}
+\label{subsec:llm_acr_evaluation_gaps}
+
+Ocena tego, jak systemy ACR oparte na modelach językowych radzą sobie w praktyce, 
+to w zasadzie jeden z najtrudniejszych tematów w literaturze. Wynika to z faktu, że code review to też proces silnie
+społeczny. Tak jak już zauważono w sekcji \ref{subsec:llm_acr_prompting}, poleganie wyłącznie na miarach
+ilościowych bywa mało miarodajne. Tufano i inni \cite{Tufano2024CodeReviewAutomation} trafnie punktują tutaj kwestię przygotowania zbiorów 
+danych - jeśli mapowanie komentarzy do konkretnych zmian w kodzie jest nieprecyzyjne, to wyniki 
+modelu mogą wyglądać na papierze bardzo dobrze, podczas gdy w realnym procesie pracy programisty będą 
+zupełnie nieprzydatne. Prowadzi to do co raz częściej występujących głosów w literaturze, że konieczne jest używanie
+również weryfikacji funkcjonalnej obok metryk automatycznych \cite{Tufano2024CodeReviewAutomation, Zhang2024SurveyLLMSE}.
+Nie jest to jednak proste do wdrożenia w badaniach.
+
+\paragraph{Metryki tekstowe a poprawność merytoryczna.}
+Metryki generacji tekstu, takie jak BLEU czy BERTScore to kolejny aspekt warty omówienia. Haider 
+i in. \cite{Haider2024PromptingFineTuningRCG} pokazali, że pozwalają one na pewną formę porównywania wyników między modelami, 
+to tak naprawdę niewiele mówią one o tym, czy wygenerowana porada ma sens merytoryczny i czy jest zgodna z konkretnymi
+standardami danego projektu \cite{Tufano2024CodeReviewAutomation}. Problem nie jest łatwy w rozwiązaniu, ponieważ
+komentarze w procesie przeglądu kodu dotyczą skrajnie różnych rzeczy: czystości stylu, wydajność kodu, poprawność
+logiki biznesowej i inne. Ciężko więc oczekiwać, że jakość recenzji da się 
+sprowadzić do jakiegoś jednego, uniwersalnego wskaźnika liczbowego, co zresztą potwierdzają też autorzy pracy \cite{Li2025CodeDoctor}, 
+wskazując na trudności w obiektywnej kategoryzacji takich uwag.
+
+\paragraph{Ewaluacja funkcjonalna i ryzyko regresji.}
+Praktyka bardziej skupiona na odpowiedzi, czy sugerowana zmiana faktycznie poprawia
+kod, a nie tylko wygląda "rozsądnie" na papierze jest bliższe rozsądkowi. Protokół walidacji oparty o testy jednostkowe, zaproponowany
+przez Cihana i in. i omówiony wcześniej przy okazji intencji modelu, pokazuje przy tym dość jasno, że ryzyko wprowadzenia
+zmian szkodliwych nie jest zerowe \cite{Cihan2025EvaluatingLLMsForCodeReview}. W kontekście projektowanego systemu
+oznacza to konieczność dołożenia elementów zabezpieczających, np. automatycznej walidacji w procesach CI
+oraz podejścia \emph{human-in-the-loop}.
+
+\paragraph{Ewaluacja diagnostyczna i znaczenie kontekstu.}
+Faktycznie zrozumienie zmian w code review jest nowoczesnym podejściem które co raz częściej widać w systemach automatyzacji
+tego procesu. Służą do tego dedykowane benchmarki, takie jak CodeReviewQA 
+\cite{Lin2025CodeReviewQA}, które pozwalają sprawdzić, czy model w ogóle potrafi poprawnie zinterpretować intencje stojące za 
+zmianami w kodzie, zanim jeszcze zaproponuje konkretne poprawki \cite{Lin2025CodeReviewQA}. Odpowiednie osadzenie modelu
+w kontekście konkretnego repozytorium do kolejny istotny aspekt widoczny w literaturze. Zastosowanie mechanizmów RAG albo
+łączenie LLM-ów z analizą statyczną — co opisują Meng \cite{Meng2025RARe} oraz Jaoua \cite{Jaoua2025LLMStaticAnalyzersCR} — nie tylko
+poprawia samą jakość generowanych odpowiedzi, ale też sprawia, że łatwiej jest prześledzić ich pochodzenie.
+
+\paragraph{Luki w badaniach i wnioski dla projektowania systemów.}
+Przy analizowaniu obecnych rozwiązań ACR widać jednak kilka wyraźnych braków:
+\begin{itemize}
+    \item \textbf{Niepełny cykl pracy}: Większość prac skupia się właściwie tylko na tym, 
+jak wygenerować komentarz do kodu. Jak zauważa Germano \cite{Germano2025VulnSLR}, brakuje tutaj szerszego spojrzenia, które 
+obejmowałoby też etap uzasadniania decyzji czy późniejszą, automatyczną naprawę wykrytego problemu.
+    \item \textbf{Problemy z jakością danych treningowych}: Same dane bywają problematyczne. Yu i 
+in. \cite{Yu2025Desiview} słusznie punktują, że bez rygorystycznego filtrowania (np. poprzez destylację DRC), modele po 
+prostu uczą się od ludzi mało efektywnych wzorców komunikacji, co potem przekłada się na 
+słabą jakość sugestii.
+    \item \textbf{Praktyczne bariery przy wdrożeniach}: Na koniec zostają kwestie czysto techniczne i 
+biznesowe. Doświadczenia opisane przez Ramesha na przykładzie Ericssona \cite{Ramesh2025EricssonExperience} pokazują, że finalnie to nie 
+parametry modelu, a koszty, czas odpowiedzi i trudność zintegrowania narzędzia z obecnym workflow programistów 
+decydują o tym, czy system się przyjmie.
+\end{itemize}
+
+Biorąc powyższe pod uwagę, stwierdzić można, że budowa efektywnego narzędzia do wspomagania przeglądu kodu
+wymaga więcej niż prostego generowania kodu. Kluczowe okazuje się tutaj 
+połączenie selektywnego podejścia do kontekstu z bardzo dokładną, wielowarstwową 
+procedurą ewaluacji. Ocena nie może ograniczać się tylko do samej poprawności składni; 
+musi brać pod uwagę też realną użyteczność i pilnować, żeby nie dochodziło 
+do regresji w kodzie \cite{Tufano2024CodeReviewAutomation, Zhang2024SurveyLLMSE}. 
+Wspomniane aspekty są kluczowe dla zapewnienia stabilności narzędzia.

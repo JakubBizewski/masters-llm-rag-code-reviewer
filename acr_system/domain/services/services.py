@@ -75,6 +75,7 @@ class ContextBuilder:
                 filters={
                     "source": "pr_history",
                     "repo": pr.repository,
+                    "exclude_pr_number": str(pr.pr_number),
                 },
             )
 
@@ -225,6 +226,8 @@ class ReviewOrchestrator:
                 if issue.file_path == hunk.file_path.value
                 and (issue.line_number is None or hunk.is_line_in_hunk(issue.line_number))
             ]
+
+            logger.info(f"Reviewing hunk in {hunk.file_path.value} with {len(context)} context items and {len(relevant_ci_issues)} relevant CI issues\nBefore: {hunk.context_before}\nAfter: {hunk.context_after}\n\n")
             
             # Generate review comments with LLM
             comments = await llm_provider.generate_review_comments(

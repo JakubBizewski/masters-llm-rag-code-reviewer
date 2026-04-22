@@ -1,0 +1,150 @@
+\section{Podsumowanie stanu wiedzy i wnioski dla projektu}
+\label{subsubsec:llm_acr_synthesis}
+
+Najnowsze publikacje kreują obraz tego w jakim obecnie punkcie znajduje się zagadnienie automatycznego
+przeglądu kodu. Widać głównie, że przestano traktować LLM jako cudowne i samodzielne narzędzie, które samo
+ma rozwiązać problemy z kodem. Zamiast tego, nowoczesne narzędzia idą w stronę złożonych architektur systemowych, co pokazują 
+Meng i Ramesh \cite{Meng2025RARe, Ramesh2025EricssonExperience}. Model językowy staje się jednym z wielu modułów w całym
+ekosystemie.
+
+Do stworzenia właśnego systemu przeglądu kodu, można wyciągnąć parę konkretnych ustaleń:
+\begin{itemize}
+    \item \textbf{Samo promptowanie to za mało.} Choć techniki opisane w rozdziale \ref{subsec:llm_acr_prompting} 
+są to najszybsze i najprostsze rozwiązanie, to ich ogromna wrażliwość 
+na drobne zmiany w treści zapytania jest problematyczna. Zamiast statycznych instrukcji 
+lepiej postawić na ustrukturyzowane ICL, gdzie kontekst dobierany jest automatycznie (np. przez BM25), co 
+sugerują Pornprasit i Haider \cite{Pornprasit2024FineTuningPromptingCR, Haider2024PromptingFineTuningRCG}.
+    
+    \item \textbf{Znaczenie jakości danych nad architekturą.} Jak już wspomniano przy omawianiu fine-tuningu 
+(\ref{subsec:llm_acr_finetuning}), metody takie jak LoRA czy QLoRA faktycznie pomagają "wymusić" na modelu konkretny styl 
+czy strukturę odpowiedzi. Kluczowe nie jest tylko dostrajanie parametrów, a raczej to, co 
+do modelu dodajemy. Metoda DRC pokazuje, jak ważne jest odfiltrowanie szumu z "ludzkich" zbiorów 
+danych, żeby model nie uczył się złych nawyków \cite{Yu2025Desiview, Yu2024Carllm}.
+    
+    \item \textbf{Kontekst repozytorium jest bardzo ważny.} Patrzenie tylko na 
+same \emph{diffy} to zły kierunek, bo model ma wtedy zbyt wąski horyzont wiedzy \cite{Tufano2024CodeReviewAutomation}. 
+Skuteczny system ACR musi wiedzieć więcej, czyli integrować RAG z analizą statyczną. 
+To właściwie jedyny sposób, żeby ograniczyć generowanie halucynacji i zbyt ogólnego generowania tekstu w komentarzach \cite{Jaoua2025LLMStaticAnalyzersCR, 
+Icoz2025SymbolicReasoning}. Trochę więcej miejsca poświęcono temu w sekcji \ref{subsec:llm_acr_context_hybrid}.
+    
+    \item \textbf{Zmiana myślenia o ewaluacji.} Tradycyjne metryki, którymi często ocenia się tekst 
+(jak BLEU czy BERTScore), w przypadku kodu słabo się sprawdzają, o czym była mowa 
+w \ref{subsec:llm_acr_evaluation_gaps}. W projektowaniu systemu priorytetem powinna być weryfikacja funkcjonalna i to, czy 
+sugerowane zmiany faktycznie przechodzą testy jednostkowe. Chodzi o to, żeby system był faktycznie użyteczny \cite{Cihan2025EvaluatingLLMsForCodeReview, Lin2025CodeReviewQA}.
+    
+    \item \textbf{Problem wielowymiarowości i jakości komentarzy.} Code review nie jest
+zadaniem jednowymiarowym - badania pokazują, że 78,7\% komentarzy dotyczy co najmniej
+dwóch różnych kategorii problemów \cite{Li2025CodeDoctor}. Skuteczny system musi więc
+oceniać komentarze pod kątem trafności (\emph{relevance}), użyteczności
+(\emph{actionability}) oraz zrozumiałości (\emph{comprehensibility}). Problem ogólnikowości
+(\emph{vagueness}) dotyka aż 61\% komentarzy generowanych tradycyjnymi metodami
+\cite{Ren2025HydraReviewer}, przez co w praktyce często niewiele użytecznego z nich wynika.
+
+    \item \textbf{Ryzyko regresji i konieczność warstwy zabezpieczeń.} Nawet zaawansowane
+modele potrafią zaproponować zmiany pogarszające poprawny kod - \emph{Regression Ratio}
+wynosi 10-13\% \cite{Cihan2025EvaluatingLLMsForCodeReview}. Dodatkowo lokalizacja
+fragmentu kodu okazuje się nproblemem modeli LLM \cite{Lin2025CodeReviewQA}.
+To wymusza podejście \emph{human-in-the-loop} oraz mechanizmy walidacji funkcjonalnej.
+\end{itemize}
+
+Współczesne badania \cite{Tang2025MoEReviewer, Lu2023LLaMAReviewer} coraz częściej odchodzą od traktowania predykcji, generowania i poprawiania jako 
+całkowicie osobnych kroków. Architektury wielozadaniowe (np. MoE) są pod tym względem preferowane - łączą 
+one te elementyw jednym podejściu. W praktyce ma to sens zwłaszcza wtedy, gdy taki 
+system ma działać w potokach CI/CD: da się utrzymać dobrą efektywność, a jednocześnie ograniczać 
+koszty.
+
+\paragraph{Główne problemy i braki w obecnych badaniach.}
+Widać ogromny postęp w literaturze, jednak przyglądając się publikacjom bliżej, można dostrzec 
+kilka dość istotnych luk. Widać sporą dysproporcję w tym, czym zajmują się 
+badacze - aż 91,3\% prac skupia się tylko na samym wykrywaniu podatności, podczas gdy 
+automatyczna naprawa kodu czy chociażby sensowne wyjaśnianie błędów to wciąż tematy rzadko poruszane \cite{Germano2025VulnSLR}. 
+Inna sprawa to kwestia rzetelności samych danych. Okazuje się, że popularne zbiory treningowe są 
+mocno "zaśmiecone" (szum sięga tu ok. 25\%), a problem \emph{data leakage} potrafi sztucznie zawyżyć 
+wyniki modeli nawet o ponad 30 punktów procentowych \cite{Tufano2024CodeReviewAutomation, Germano2025VulnSLR}. Dochodzą bariery 
+czysto praktyczne, o których wspomina się rzadziej, a które w rzeczywistym środowisku programistycznym są 
+kluczowe. Chodzi tu głównie o koszty utrzymania takich modeli, czas oczekiwania na odpowiedź i 
+to, jak w ogóle wpiąć takie narzędzie w codzienny workflow programisty, żeby nie przeszkadzało 
+w pracy \cite{Ramesh2025EricssonExperience}.
+
+\paragraph{Analiza porównawcza podejść - co działa, a co nie.}
+Na podstawie przeglądu literatury można wyciągnąć konkretne wnioski dotyczące efektywności poszczególnych
+podejść w automatycznym code review. Tabela \ref{tab:porownanie_podejsc} syntetycznie zestawia kluczowe
+charakterystyki i wskazuje, kiedy dane rozwiązanie jest optymalne, a kiedy zawodzi.
+
+\begin{table}[h]
+\centering
+\caption{Porównanie podejść do automatycznego code review z LLM - synteza wniosków z literatury.}
+\label{tab:porownanie_podejsc}
+\small
+\begin{tabular}{p{2.4cm}p{3.8cm}p{3.8cm}p{3.8cm}}
+\hline
+\textbf{Podejście} & \textbf{Co działa najlepiej} & \textbf{Ograniczenia} & \textbf{Warunki sukcesu} \\
+\hline
+\textbf{Promptowanie (ICL)} & 
+Szybkie prototypowanie; BM25 do doboru przykładów; top-1 few-shot \cite{Pornprasit2024FineTuningPromptingCR, Meng2025RARe} & 
+Wrażliwość na konstrukcję promptu; ograniczony kontekst; niska stabilność \cite{Haider2024PromptingFineTuningRCG} & 
+Ustrukturyzowane ICL z automatycznym doborem przykładów; nie więcej niż 3 demonstracje \\
+\hline
+\textbf{Fine-tuning (PEFT)} & 
+Spójność stylu komentarzy; efektywność zasobowa (LoRA \textasciitilde16MB) \cite{Lu2023LLaMAReviewer}; ukierunkowanie domenowe & 
+Zależność od jakości danych (szum \textasciitilde25\%); ryzyko przeuczenia \cite{Tufano2024CodeReviewAutomation, Yu2025Desiview} & 
+Destylacja DRC; filtracja danych; wielozadaniowe architektury (MoE) \cite{Tang2025MoEReviewer, Yu2025Desiview} \\
+\hline
+\textbf{RAG} & 
+Redukcja ogólnikowości (61\% → 16.4\%); wzrost BLEU +110-153\% \cite{Ren2025HydraReviewer, Meng2025RARe} & 
+Top-5 gorsze niż top-1 (szum w kontekście); koszt retrievalu; jakość indeksu \cite{Meng2025RARe} & 
+Top-1 retrieval; selektywny dobór kontekstu (AST, historia, standardy); deduplikacja \\
+\hline
+\textbf{Hybryda (LLM+statyka)} & 
+Łączenie pokrycia LLM z precyzją reguł; weryfikowalność sugestii \cite{Jaoua2025LLMStaticAnalyzersCR, Ramesh2025EricssonExperience} & 
+Złożoność integracji; ryzyko konfliktu sygnałów; koszt utrzymania pipeline & 
+RAG oparty o wyniki analizatorów; walidacja funkcjonalna (testy); human-in-the-loop \\
+\hline
+\end{tabular}
+\end{table}
+
+Kluczowym wnioskiem z tego zestawienia jest to, że \textbf{nie ma jednego uniwersalnego podejścia}.
+Efektywność zależy od kontekstu wdrożenia: promptowanie działa dobrze w scenariuszach cold-start
+i prototypowania, ale stabilność wymaga fine-tuningu na wysokiej jakości danych. RAG radykalnie
+poprawia trafność, lecz wymaga przemyślanej strategii retrievalu (top-1 lepsze niż top-k). Podejścia
+hybrydowe osiągają najlepsze wyniki pod warunkiem dobrej integracji z workflow, co potwierdza
+doświadczenie Ericsson \cite{Ramesh2025EricssonExperience}.
+
+Z perspektywy projektowania systemu decydujące okazują się czynniki praktyczne: koszt inferencji
+(MoE: 16.38 TFLOPs vs LLaMA 7B: 57.34 TFLOPs \cite{Tang2025MoEReviewer}), czas odpowiedzi
+(kluczowy w CI/CD), oraz możliwość weryfikacji wyników (Regression Ratio 10-13\%
+\cite{Cihan2025EvaluatingLLMsForCodeReview}). Literatura jednoznacznie wskazuje, że metryki tekstowe
+(BLEU) nie korelują z użytecznością w praktyce - 21.83\% odrzuconych przez EM predykcji było
+semantycznie poprawnych \cite{Tufano2024CodeReviewAutomation}. Zamiast tego priorytet powinny mieć
+kryteria jakościowe: trafność lokalizacji (\emph{CL}), użyteczność (\emph{actionability}) oraz
+ryzyko regresji, co pokazują benchmarki typu CodeReviewQA \cite{Lin2025CodeReviewQA}.
+
+\paragraph{Wnioski i kierunek realizacji projektu.}
+Z analizy źródeł wynika, że jeśli system wspomagający code review ma faktycznie działać, nie 
+może opierać się na samym modelu LLM. Potrzebna jest tu raczej architektura hybrydowa. Model 
+powinien pełnić rolę generatora, ale musi być obudowany dodatkowymi mechanizmami, takimi jak RAG czy 
+analiza statyczna i walidacja funkcjonalna.
+
+\paragraph{Identyfikacja luki badawczej.}
+Przegląd literatury pokazuje lukę o charakterze praktycznym i systemowym. Istniejące prace koncentrują się na 
+pojedynczych elementach: generacji komentarzy \cite{Pornprasit2024FineTuningPromptingCR, Haider2024PromptingFineTuningRCG},
+dostrajaniu modeli \cite{Lu2023LLaMAReviewer, Tang2025MoEReviewer} lub RAG \cite{Meng2025RARe}. Brakuje 
+rozwiązań end-to-end łączących retrieval kontekstu, generację LLM i walidację funkcjonalną w realnym workflow PR/MR 
+z konfigurowalnością per-projekt i warstwą human-in-the-loop. Wdrożenia przemysłowe (Ericsson \cite{Ramesh2025EricssonExperience}) nie adresują wieloplatformowości, prace 
+akademickie (RARe \cite{Meng2025RARe}, Hydra \cite{Ren2025HydraReviewer}) nie są osadzone w produkcyjnym GitHub/GitLab lub podobnym.
+
+W ramach pracy luka będzie wypełniana przez system ACR integrujący się z PR/MR jako 
+krok CI, wykorzystujący RAG (top-1 retrieval \cite{Meng2025RARe}), łączący LLM z walidacją funkcjonalną (analiza statyczna 
+\cite{Jaoua2025LLMStaticAnalyzersCR}, human-in-the-loop \cite{bacchelli2013}), konfigurowalny per-projekt i ewaluowany
+kryteriami jakościowymi \cite{Lin2025CodeReviewQA, Ramesh2025EricssonExperience}.
+
+\paragraph{Konkrety techniczne z literatury.}
+Przegląd prac pokazuje szereg zaleceń odnośnie rozwiązań technicznych. Warstwa LLM jest konfigurowalna — w projektowanym systemie 
+wykorzystane będą gotowe, mocne modele dostępne przez API \cite{Pornprasit2024FineTuningPromptingCR, Lin2025CodeReviewQA}. 
+Implementacje RAG stosują retrieval top-1 do top-5 z użyciem baz wektorowych (FAISS) \cite{Meng2025RARe} 
+lub retrieval leksykalnego (BM25) \cite{Pornprasit2024FineTuningPromptingCR}. Ekstrakcja kontekstu kodu 
+opiera się na Tree-sitter (parser AST) do budowy call graph i izolacji funkcji \cite{Ramesh2025EricssonExperience, Pornprasit2024FineTuningPromptingCR, Ren2025HydraReviewer}. 
+Ewaluacja bazuje na BLEU-4 (typowo 5.58--13.13 dla SOTA) \cite{Pornprasit2024FineTuningPromptingCR, Meng2025RARe}, 
+BERTScore oraz ocenie praktyków w skali 1--5 (relevance, information, clarity) \cite{Pornprasit2024FineTuningPromptingCR, Tang2025MoEReviewer}. 
+Integracja z platformami VCS realizowana przez REST API + webhooks \cite{Ramesh2025EricssonExperience, Jaoua2025LLMStaticAnalyzersCR}, 
+co umożliwia obsługę GitHub, GitLab i innych systemów PR/MR. Szczegóły architektury i metodyki ewaluacji opisano w kolejnym rozdziale.

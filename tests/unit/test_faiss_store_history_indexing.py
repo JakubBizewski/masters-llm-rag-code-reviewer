@@ -28,6 +28,12 @@ class _FakeIndexFlatL2:
         for v in vectors:
             self._vectors.append(list(v))
 
+    def search(self, query_vectors, k):  # noqa: ARG002
+        k = max(0, min(int(k), self.ntotal))
+        distances = [[float(i) for i in range(k)]]
+        indices = [[i for i in range(k)]]
+        return distances, indices
+
 
 class _FakeNP:
     float32 = "float32"
@@ -196,3 +202,104 @@ async def test_index_review_history_is_idempotent_for_same_pr(monkeypatch, tmp_p
     assert store.index.ntotal == first_vectors
     assert len(store.documents) == first_docs
     assert store.stats["embedding_texts"] == first_embeds
+
+
+@pytest.mark.asyncio
+async def test_search_similar_excludes_current_pr(monkeypatch, tmp_path):
+    monkeypatch.setattr(faiss_store, "FAISS_AVAILABLE", True)
+    monkeypatch.setattr(
+        faiss_store,
+        "faiss",
+        SimpleNamespace(IndexFlatL2=_FakeIndexFlatL2, write_index=lambda *a, **k: None),
+    )
+    monkeypatch.setattr(faiss_store, "np", _FakeNP())
+    monkeypatch.setattr(FAISSStore, "_load_if_exists", lambda self: None)
+
+    store = FAISSStore(storage_path=str(tmp_path))
+    store._embedding_model = _FakeEmbeddingModel(dim=3)
+    store.dimension = 3
+    store._initialize_index()
+
+    assert store.index is not None
+    store.index.add([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    store.documents = [
+        {
+            "content": "current pr thread",
+            "source": "pr_history_comment_thread",
+            "repo": "owner/repo",
+            "pr_number": "7",
+            "comment_id": "11",
+        },
+        {
+            "content": "current pr diff",
+            "source": "pr_history_diff",
+            "repo": "owner/repo",
+            "pr_number": "7",
+        },
+        {
+            "content": "older pr thread",
+            "source": "pr_history_comment_thread",
+            "repo": "owner/repo",
+            "pr_number": "6",
+            "comment_id": "9",
+        },
+    ]
+
+    results = await store.search_similar(
+        query="cache changes",
+        top_k=3,
+        filters={
+            "source": "pr_history",
+            "repo": "owner/repo",
+            "exclude_pr_number": "7",
+        },
+    )
+
+    assert [r.content for r in results] == ["older pr thread"]
+
+
+@pytest.mark.asyncio
+async def test_search_similar_excludes_current_pr_even_when_only_diff_exists(monkeypatch, tmp_path):
+    monkeypatch.setattr(faiss_store, "FAISS_AVAILABLE", True)
+    monkeypatch.setattr(
+        faiss_store,
+        "faiss",
+        SimpleNamespace(IndexFlatL2=_FakeIndexFlatL2, write_index=lambda *a, **k: None),
+    )
+    monkeypatch.setattr(faiss_store, "np", _FakeNP())
+    monkeypatch.setattr(FAISSStore, "_load_if_exists", lambda self: None)
+
+    store = FAISSStore(storage_path=str(tmp_path))
+    store._embedding_model = _FakeEmbeddingModel(dim=3)
+    store.dimension = 3
+    store._initialize_index()
+
+    assert store.index is not None
+    store.index.add([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    store.documents = [
+        {
+            "content": "current pr diff",
+            "source": "pr_history_diff",
+            "repo": "owner/repo",
+            "pr_number": "7",
+        },
+        {
+            "content": "older pr thread",
+            "source": "pr_history_comment_thread",
+            "repo": "owner/repo",
+            "pr_number": "6",
+            "comment_id": "9",
+        },
+    ]
+
+    results = await store.search_similar(
+        query="cache changes",
+        top_k=2,
+        filters={
+            "source": "pr_history",
+            "repo": "owner/repo",
+            "exclude_pr_number": "7",
+        },
+    )
+
+    assert [r.content for r in results] == ["older pr thread"]
