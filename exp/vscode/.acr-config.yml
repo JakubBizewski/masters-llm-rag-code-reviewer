@@ -1,0 +1,428 @@
+# ACR Configuration for microsoft/vscode
+# Generated from .github/instructions/*.instructions.md files
+# Place this file (.acr-config.yml) in the root of the vscode repository
+
+review:
+  enabled: true
+
+# ──────────────────────────────────────────────
+# Global rules — applied to every reviewed file
+# ──────────────────────────────────────────────
+global_rules:
+  - name: "security"
+    enabled: true
+    rules_text: |
+      Security Review Guidelines:
+      - Check for command injection in shell invocations and terminal integrations
+      - Check for XSS vulnerabilities in webview content and HTML rendering
+      - Validate and sanitize all user inputs and extension-provided data
+      - Check for hardcoded secrets, tokens, or credentials
+      - Ensure proper authentication checks in server endpoints
+      - Verify that telemetry data never includes PII (usernames, file paths, content)
+      - Check for path traversal vulnerabilities in file system operations
+      - Ensure webview sandboxing is properly configured (no unnecessary permissions)
+
+  - name: "code_quality"
+    enabled: true
+    rules_text: |
+      VS Code Code Quality Guidelines:
+      - All source files must include the Microsoft copyright header
+      - Use tabs, not spaces, for indentation
+      - PascalCase for types and enum values; camelCase for functions, methods, properties, and local variables
+      - Use whole words in names; avoid unexplained abbreviations
+      - Use JSDoc-style comments for functions, interfaces, enums, and classes
+      - Prefer async/await over Promise.then()
+      - Never use `any` or `unknown` unless absolutely necessary
+      - Prefer named regex capture groups over numbered ones
+      - No duplicate imports; remove blank lines left by removed imports
+      - Avoid bind()/call()/apply() solely for `this` — prefer arrow functions
+      - Avoid events for control flow between components; prefer direct method calls
+      - Use IEditorService to open editors — never IEditorGroupsService.activeGroup.openEditor
+      - Do not duplicate code; reuse existing utility functions and patterns
+
+  - name: "disposables"
+    enabled: true
+    rules_text: |
+      Disposable Lifecycle Guidelines:
+      - Register disposables immediately after creation: `const x = this._register(new X())`
+      - Use DisposableStore, MutableDisposable, or DisposableMap as appropriate
+      - Never register a disposable to `this` if it is created inside a repeatedly-called method — return it instead
+      - Call sinon.restore() in teardown to avoid mock leaks
+
+  - name: "localization"
+    enabled: true
+    rules_text: |
+      Localization Guidelines:
+      - All user-visible strings must be externalized via nls.localize()
+      - Never use string concatenation in localized strings; use {0} placeholders instead
+      - Use "double quotes" for strings that need localization; 'single quotes' for everything else
+      - UI labels: Title Case for commands/buttons/menu items; Sentence case for view titles/headings
+      - Do not capitalize prepositions of four or fewer letters unless first or last word
+
+# ──────────────────────────────────────────────
+# File-specific rules
+# ──────────────────────────────────────────────
+file_patterns:
+  # ── Core TypeScript sources ──────────────────
+  - pattern: "src/vs/**/*.ts"
+    priority: 10
+    rules_text: |
+      VS Code TypeScript Source Guidelines:
+
+      ## Layering (must not be violated)
+      - base → platform → editor → workbench → code/server/sessions
+      - Within each layer: common < browser < node < electron-browser < electron-utility < electron-main
+      - No dependency from outside contrib/ into contrib/
+      - Each contribution has a single .contribution.ts entry point
+      - Cross-contribution dependencies use the common API file — never reach into internals
+      - vs/workbench must NEVER import from vs/sessions
+
+      ## Dependency Injection
+      - Services must be declared in constructors via DI decorators
+      - Never access services through IInstantiationService outside of constructors
+      - Non-service constructor parameters must come before service parameters
+
+      ## Style
+      - Arrow functions over anonymous function expressions
+      - Only parenthesize arrow function parameters when necessary: `x => x + x` not `(x) => x + x`
+      - Always surround loop and conditional bodies with curly braces
+      - Open curly braces on the same line
+      - No surrounding whitespace in parenthesized constructs
+      - Prefer `export function x(…)` over `export const x = (…) =>` at top-level scope (better stack traces)
+
+      ## Observables (when using the observable pattern)
+      - Use observableValue(owner, initialValue) for regular values
+      - Use disposableObservableValue(owner, initialValue) when storing disposable values
+      - Use observableFromEvent when you need to track a computed value that changes with the event
+      - Use observableSignalFromEvent when you need to force re-computation every time the event fires
+      - Use transaction(tx => {...}) whenever multiple observables are synchronously updated together
+      - Model session/feature state as observables, not onDid* events
+
+      ## File watching
+      - Prefer correlated file watchers (fileService.createWatcher) over shared ones
+      - Prefer IHoverService for tooltips over custom tooltip implementations
+
+      ## Validation
+      - Run npm run valid-layers-check to verify layering before declaring work complete
+      - Never run tests if there are compilation errors; fix them first
+    llm_config:
+      provider: "anthropic"
+      model: "claude-sonnet-4-6"
+      temperature: 0.2
+      max_tokens: 3000
+    rag_config:
+      enabled: true
+      top_k: 5
+      documentation_paths:
+        - "src/vs/base/common/observableInternal/index.ts"
+        - "src/vs/platform/list/browser/listService.ts"
+      architectural_docs:
+        - "ARCHITECTURE.md"
+        - ".github/instructions/source-code-organization.instructions.md"
+        - ".github/instructions/coding-guidelines.instructions.md"
+
+  # ── Test files ───────────────────────────────
+  - pattern: "{src/vs/**/test/**/*.ts,src/vs/**/*.test.ts,src/vs/**/*.integrationTest.ts}"
+    priority: 20
+    rules_text: |
+      VS Code Test Guidelines:
+
+      ## Test Types
+      - Unit tests: *.test.ts — run in browser, Electron, or Node (depends on layer)
+      - Integration tests: *.integrationTest.ts — use real external APIs
+      - Never run tests if there are compilation errors
+
+      ## Clean Teardown
+      - Always use ensureNoDisposablesAreLeakedInTestSuite() to catch disposal leaks
+      - Always call sinon.restore() in teardown
+
+      ## Best Practices
+      - Minimize assertions per test — prefer one assert.deepStrictEqual snapshot over many fine-grained assertions
+      - Do not add tests to the wrong suite; find the correct suite block
+      - Follow existing patterns (describe/test or suite/test) consistently within a file
+      - Do not stub globals (e.g. (mainWindow as any).X = ...) — make dependencies injectable instead
+      - Use assertSnapshot for snapshot-style tests; snapshots are written to __snapshots__ on first run
+      - Each test should test one thing with a descriptive name
+      - Follow AAA pattern (Arrange, Act, Assert)
+    llm_config:
+      temperature: 0.2
+      max_tokens: 2000
+
+  # ── Sessions / Agents Window ─────────────────
+  - pattern: "src/vs/sessions/**/*.ts"
+    priority: 25
+    rules_text: |
+      Agents Window (vs/sessions) Guidelines:
+
+      ## Layering
+      - vs/sessions imports from vs/workbench and below — never the reverse
+      - Internal: Entry Points → contrib/* / services/* → browser/ & common/ (core)
+      - contrib/* must NOT import from contrib/providers/*
+
+      ## Menu & Context Keys
+      - Always use Menus.* from browser/menus.ts — never MenuId.* from vs/platform/actions
+      - All sessions-specific context keys live in common/contextkeys.ts
+
+      ## Mobile Architecture
+      - Never add IsPhoneLayoutContext branching inside a desktop component
+      - Mobile subclasses go in browser/parts/mobile/; extend desktop class, override only differing methods
+      - Co-locate component CSS in a media/ subfolder next to the component TypeScript file
+      - Do not put component-specific styles in mobileChatShell.css
+
+      ## Touch / iOS
+      - Never use EventType.MOUSE_DOWN/UP/MOVE directly — use addDisposableGenericMouse*Listener
+      - For custom clickable elements: listen to both EventType.CLICK and TouchEventType.Tap, call Gesture.addTarget
+      - Add touch-action: manipulation in CSS on custom clickable elements (not needed for native <button>)
+
+      ## State
+      - Model session state as IObservable — not onDid* events
+      - Batch state updates with transaction(tx => {...})
+      - Always import contributions in the entry points (sessions.common.main.ts, sessions.desktop.main.ts, sessions.web.main.ts)
+    llm_config:
+      temperature: 0.2
+      max_tokens: 2500
+
+  # ── AI Customization view ────────────────────
+  - pattern: "src/vs/workbench/contrib/chat/browser/aiCustomization/**/*.ts"
+    priority: 25
+    rules_text: |
+      AI Customization View Guidelines:
+      - Gate all UI elements on ChatContextKeys.enabled so they hide when AI is disabled
+      - Use WorkbenchAsyncDataTree with proper accessibilityProvider for all tree views
+      - Data source must implement IAsyncDataSource
+      - Tree renderers: one per item type (category / group / file)
+      - Context menu actions must handle both URI objects and serialized strings (check URI.isUri first)
+      - Auto-expand category nodes after setInput and on refresh
+      - Subscribe to IPromptsService change events (onDidChangeCustomAgents, onDidChangeSlashCommands)
+      - Register trees as disposables via this._register()
+
+  # ── Chat / AI features ───────────────────────
+  - pattern: "src/vs/workbench/contrib/chat/**/*.ts"
+    priority: 15
+    rules_text: |
+      Chat Feature Guidelines:
+      - All new chat/AI features must be gated on ChatContextKeys.enabled via a when clause
+      - Check IChatEntitlementService.sentiment.hidden for programmatic hiding
+      - Never show AI features when chat.disableAIFeatures is set
+      - New surfaces that expose agents or chat must respect the AI disable setting
+      - Review all new AI features to confirm they are properly gated
+
+  # ── Notebook ─────────────────────────────────
+  - pattern: "src/vs/workbench/contrib/notebook/**/*.ts"
+    priority: 15
+    rules_text: |
+      Notebook Architecture Guidelines:
+      - Notebook model resolution is handled by NotebookService
+      - Use NotebookCellList (extends WorkbenchList<CellViewModel>) for viewport virtualization
+      - Cell parts split into CellContentPart (synchronous, no flicker) and CellOverlayPart (floating, deferrable)
+      - Cell parts lifecycle: prepareRenderCell → renderCell → didRenderCell → unrenderCell
+      - For find in outputs: combine text-model search (FindMatch) with webview DOM search (window.find)
+      - Use NotebookCellEditorPool for editor instance pooling
+      - Track scroll anchors when cells above the viewport are resized
+
+  # ── Interactive Window ────────────────────────
+  - pattern: "src/vs/workbench/contrib/interactive/**/*.ts"
+    priority: 15
+    rules_text: |
+      Interactive Window Guidelines:
+      - InteractiveEditorInput wraps NotebookEditorInput for the history notebook and a separate text model for the input editor
+      - INotebookEditorModelResolverService resolves the notebook model
+      - IInteractiveDocumentService coordinates between notebook and text-editor parts
+      - IInteractiveHistoryService manages input history
+      - vscode-interactive scheme always returns empty buffer (no disk storage)
+      - InteractiveEditorSerializer handles workbench restore
+
+  # ── Agent Host ───────────────────────────────
+  - pattern: "src/vs/platform/agentHost/**/*.ts"
+    priority: 20
+    rules_text: |
+      Agent Host Guidelines:
+      - Communication follows the Agent Host Protocol (spec in ../agent-host-protocol sibling directory)
+      - Prefer modeling features as pure state + actions (redux-like) over imperative commands
+      - State tree is immutable, mutated exclusively by actions through pure reducers
+      - Clients subscribe to state by URI and load data on demand (lazy loading)
+      - Clients optimistically apply their own actions then reconcile with server echo
+      - Check capabilities object before using features (forward-compatible versioning)
+
+  # ── Tree Widgets ─────────────────────────────
+  - pattern: "src/vs/platform/list/browser/**/*.ts"
+    priority: 15
+    rules_text: |
+      Workbench Tree Widget Guidelines:
+      - Always use IInstantiationService.createInstance() to ensure proper DI
+      - All workbench trees require an accessibilityProvider with getAriaLabel and getRole
+      - Choose the right widget: WorkbenchObjectTree (static), WorkbenchAsyncDataTree (dynamic/async), WorkbenchCompressible*Tree (deep hierarchies)
+      - Always register trees as disposables in the containing component
+      - Always call layout() on container init and size changes
+      - Use identityProvider for efficient updates and state preservation
+      - Use compression for deep hierarchies to reduce DOM nodes
+
+  # ── Telemetry ────────────────────────────────
+  - pattern: "src/vs/**/*telemetry*/**/*.ts"
+    priority: 15
+    rules_text: |
+      Telemetry Guidelines (GDPR compliance required):
+
+      ## Classifications
+      - SystemMetaData: non-personal system info, preferences, feature usage, identifiers (most common)
+      - CallstackOrException: error messages, stack traces — only for actual error information
+      - PublicNonPersonalData: publicly available data (rare)
+
+      ## Purposes
+      - FeatureInsight: understanding feature usage and adoption (default)
+      - PerformanceAndHealth: errors, metrics, diagnostics
+
+      ## Required fields in every classification type
+      - comment: clear explanation of the field and why it is collected
+      - owner: GitHub username (infer from branch or ask)
+      - isMeasurement: true — required for all numeric values used in calculations
+
+      ## Naming conventions
+      - Event names: camelCase with context (extensionActivationError, chatMessageSent)
+      - Property names: specific and descriptive (agentId not id, durationMs not duration)
+
+      ## Critical don'ts
+      - No PII: no usernames, emails, file paths, or content
+      - Do not omit the owner field
+      - Do not use vague comments
+      - Do not miss isMeasurement on numeric metrics
+
+      ## API
+      - Use publicLog2<TEvent, TClassification> for standard events
+      - Use publicLogError2<TEvent, TClassification> for error events with CallstackOrException
+
+  # ── Accessibility ─────────────────────────────
+  - pattern: "src/vs/**/accessibility/**/*.ts"
+    priority: 20
+    rules_text: |
+      Accessibility Guidelines:
+      - Scope accessibility keybindings with CONTEXT_ACCESSIBILITY_MODE_ENABLED to prevent conflicts
+      - Use AccessibleContentProvider directly — do not create custom subclasses
+      - Check accessibility.verbosity.[feature] before verbose announcements
+      - For announcements: only announce when search string is present, widget is visible, and screen reader is active
+      - Prevent double-speak: track announcement state with a flag and use a ~1 second timeout
+      - For important state changes provide all three: audio signal, ARIA alert (status()), and OS notification
+      - OS notifications are conditional on !targetWindow.document.hasFocus()
+      - Register new accessible features with a verbosity setting in accessibility configuration
+      - Extend AccessibleViewProviderId and AccessibilityVerbositySettingId enums for new help providers
+
+  # ── Proposed API ─────────────────────────────
+  - pattern: "src/vscode-dts/**/vscode.proposed.*.d.ts"
+    priority: 20
+    rules_text: |
+      Proposed API Guidelines:
+      - When making a non-backwards-compatible change to a chat or languageModel proposal, increment the version number at the top of the file
+      - Format: `// version: N` (plain integer, no semver)
+      - Non-backwards-compatible: removing a non-optional property, or changing to an incompatible type
+      - Backwards-compatible (no version bump needed): additive changes or deleting already-optional properties
+      - Whenever possible, make backwards-compatible changes
+      - When bumping the version, also increment the matching version in the extension's package.json
+
+  # ── New esbuild build system ──────────────────
+  - pattern: "build/next/**/*.ts"
+    priority: 15
+    rules_text: |
+      New esbuild Build System Guidelines:
+      - Build scripts run directly with node — do NOT use `npm run compile` to validate them
+      - To test changes: `node build/next/index.ts transpile --out out-test`
+      - Dev/transpile path should copy ALL non-TS files (completeness); production/bundle path uses curated patterns (size)
+      - Any step that modifies JS output must update the source map accordingly (use source-map library)
+      - esbuild onLoad return type has no sourcemap field — embed inline source maps in returned contents
+      - NLS plugin is unshift-ed (runs first) so it wins over fileContentMapperPlugin on TS files
+      - Desktop target must NOT include web workbench bundles (workbench.web.main.internal.js, browser/workbench.js)
+      - Always verify new entry points against the old build's per-target definitions in buildfile.ts
+      - Do not add new output file formats that create parity differences with the old build
+
+  # ── OSS License files ─────────────────────────
+  - pattern: "{ThirdPartyNotices.txt,cli/ThirdPartyNotices.txt,cglicenses.json,cgmanifest.json}"
+    priority: 30
+    rules_text: |
+      OSS License Review Guidelines:
+
+      ## ThirdPartyNotices.txt
+      - Every new entry must have a license type header (e.g. "MIT License", "Apache License 2.0")
+      - License text must be present and non-empty for every entry
+      - License text must match the declared type — MIT-declared entry must contain MIT text, not Apache
+      - Removed entries must be cleanly removed with no leftover fragments
+      - Entries must be sorted alphabetically by package name
+
+      ## cglicenses.json
+      - New overrides must have a justification comment
+      - Flag stale entries for packages no longer in the dependency tree
+
+      ## cgmanifest.json
+      - Package versions must match what is actually installed
+      - Repository URLs must be valid and point to real source repositories
+      - New license identifiers should use SPDX format where possible
+      - License identifiers must match the corresponding ThirdPartyNotices.txt entries
+
+      ## Red Flags — flag immediately
+      - Any NEWLY ADDED copyleft license (GPL, LGPL, AGPL) — existing pre-approved entries (e.g. ffmpeg) are OK
+      - Any "UNKNOWN" or placeholder license text
+      - License text that appears truncated or corrupted
+      - A package declared as MIT but containing Apache/BSD/other license text (or vice versa)
+
+  # ── Extension manifests ───────────────────────
+  - pattern: "extensions/*/package.json"
+    priority: 10
+    rules_text: |
+      Extension Manifest Guidelines:
+      - No secrets or credentials in extension manifests
+      - Use environment variables for sensitive data
+      - Verify proposed API version numbers match corresponding .d.ts files
+      - Check activation events are not overly broad (avoid * activation)
+      - Contribution points must include proper when clauses for AI/chat features
+
+  # ── Configuration files ───────────────────────
+  - pattern: "**/*.{yml,yaml,json}"
+    priority: 5
+    rules_text: |
+      Configuration File Guidelines:
+      - No secrets or credentials in config files
+      - Use environment variables for sensitive data
+      - Validate JSON/YAML syntax
+      - Add comments explaining non-obvious configurations
+
+# ──────────────────────────────────────────────
+# Global LLM configuration
+# ──────────────────────────────────────────────
+llm:
+  provider: "anthropic"
+  model: "claude-sonnet-4-6"
+  temperature: 0.2
+  max_tokens: 3000
+
+# ──────────────────────────────────────────────
+# Global RAG configuration
+# ──────────────────────────────────────────────
+rag:
+  enabled: true
+  top_k: 5
+  documentation_paths:
+    - "README.md"
+    - "CONTRIBUTING.md"
+    - ".github/instructions/"
+    - "wiki/"
+  architectural_docs:
+    - "ARCHITECTURE.md"
+    - ".github/instructions/source-code-organization.instructions.md"
+    - ".github/instructions/coding-guidelines.instructions.md"
+    - ".github/instructions/copilot-instructions.md"
+
+# ──────────────────────────────────────────────
+# Impact Analysis (Breaking Changes Detection)
+# ──────────────────────────────────────────────
+impact_analysis:
+  enabled: true
+  max_callers_per_function: 10
+  depth: 1
+  analyze_imports: true
+  severity_threshold: "medium"
+  exclude_patterns:
+    - "src/vs/**/test/**"
+    - "**/*.test.ts"
+    - "**/*.integrationTest.ts"
+    - "out/**"
+    - "out-build/**"
+    - "out-vscode*/**"
+    - ".build/**"
