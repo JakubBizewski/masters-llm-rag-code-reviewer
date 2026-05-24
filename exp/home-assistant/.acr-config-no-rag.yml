@@ -1,0 +1,229 @@
+# ACR Configuration for home-assistant/core — NO RAG variant
+# Use this config for the "without RAG" baseline evaluation runs.
+# Identical to .acr-config.yml except rag.enabled is false everywhere.
+
+review:
+  enabled: true
+
+global_rules:
+  - name: "security"
+    enabled: true
+    rules_text: |
+      Security Review Guidelines:
+      - Diagnostics must NEVER expose passwords, API tokens, secrets, or sensitive coordinates
+      - Do not hardcode credentials, tokens, or API keys in any file
+      - Validate all user inputs through HA service/action schemas before use
+      - Check for injection vulnerabilities in template rendering or shell calls
+      - Sensitive config entry data (passwords, keys) must use CONF_PASSWORD semantics and not appear in logs
+      - Home Assistant processes user-supplied YAML/templates — flag any eval or dynamic code execution
+
+  - name: "code_quality"
+    enabled: true
+    rules_text: |
+      Home Assistant Python Code Quality Guidelines:
+      - Python 3.14 is the minimum version. Do NOT flag features or syntax requiring 3.14 as issues.
+      - Python 3.14 allows `except TypeA, TypeB:` without parentheses — do NOT flag this.
+      - Python 3.14 lazy annotations (PEP 649): forward references do NOT need to be quoted. Do NOT flag unquoted forward references in annotations.
+      - Do not use `from __future__ import annotations` (not needed in Python 3.14).
+      - Use async/await throughout — never block the event loop with synchronous I/O.
+      - All functions should have type annotations.
+      - Prefer concrete types (HomeAssistant, MockConfigEntry) over Any.
+      - Do not add comments that just restate the code — comments must explain WHY (non-obvious constraints, workarounds, surprising behavior).
+      - Do not add redundant defensive checks for fields already validated by HA schemas and entity filters.
+      - When validation guarantees a dict key exists, use direct indexing (`data["key"]`) not `.get("key")`.
+      - Do not use `scan_interval`, `update_interval`, or `polling_frequency` as user-configurable config options.
+      - Do not allow users to set config entry names in config flows (names are auto-generated).
+
+  - name: "performance"
+    enabled: true
+    rules_text: |
+      Performance Review Guidelines:
+      - All network I/O and device communication must be async.
+      - Use DataUpdateCoordinator for polling-based integrations — never poll inside entity update methods.
+      - Use Debouncer when multiple rapid state changes trigger coordinator refresh.
+      - Polling intervals are set in code only — never expose them to users.
+      - Avoid creating background tasks outside of config_entry.async_create_background_task.
+      - Use async_track_* helpers instead of manual scheduling where possible.
+
+file_patterns:
+  - pattern: "homeassistant/components/**/*.py"
+    priority: 10
+    rules_text: |
+      Integration General Guidelines:
+      - Integration code lives in homeassistant/components/<domain>/.
+      - Integrations should be thin wrappers. Protocol parsing, device state machines, or domain logic belong in a PyPI library — do NOT inline them.
+      - Do NOT implement fixes/workarounds for library limitations; the library should be updated instead.
+      - When looking for examples, prefer Platinum or Gold quality_scale integrations as reference.
+
+      ## Entity Platform Symmetry
+      - async_added_to_hass() and async_will_remove_from_hass() must be symmetrical.
+      - Any subscription created in async_added_to_hass() must be unsubscribed in async_will_remove_from_hass().
+      - Anything torn down in async_will_remove_from_hass() must be set up in async_added_to_hass().
+
+      ## Quality Scale
+      - Always consider quality scale rules when implementing or reviewing an integration.
+      - Bronze rules are always required for any integration with a quality_scale declaration.
+      - Silver/Gold/Platinum rules only apply if the integration targets that tier.
+      - Check quality_scale.yaml for rule status: done | exempt (with reason) | todo.
+
+      ## Error Handling
+      - Raise HomeAssistantError or a subclass for user-visible errors; never let library exceptions bubble up raw.
+      - Log errors with _LOGGER — never use print().
+      - Use _LOGGER.debug for verbose diagnostic messages, not _LOGGER.info.
+
+      ## Config Entries
+      - Use typed config entry aliases: `type MyConfigEntry = ConfigEntry[MyCoordinator]`
+      - Store runtime data on entry.runtime_data, not as module-level globals.
+      - Use entry.async_on_unload() to register cleanup callbacks.
+    llm_config:
+      provider: "anthropic"
+      model: "claude-sonnet-4-6"
+      temperature: 0.2
+      max_tokens: 3000
+    rag_config:
+      enabled: false
+
+  - pattern: "homeassistant/components/**/config_flow.py"
+    priority: 20
+    rules_text: |
+      Config Flow Guidelines:
+      - Config flows must inherit from ConfigFlow with `domain = DOMAIN`.
+      - Always call async_set_unique_id() before _abort_if_unique_id_configured() in discovery flows.
+      - Do NOT allow users to set the config entry name — use auto-generated titles.
+      - Do NOT add scan_interval, update_interval, or polling frequency options.
+      - Test connection/device availability in async_step_user before creating entry (test-before-configure rule).
+      - Use self.async_abort(reason="already_configured") for duplicate entries.
+      - Discovery flows (bluetooth, zeroconf, dhcp, etc.) must call async_set_unique_id() from discovery info.
+      - Reconfiguration flows: use async_step_reconfigure() and only allow changing safe fields (never unique_id fields).
+      - Reauthentication flows: use async_step_reauth() and async_step_reauth_confirm().
+      - For Bluetooth: use async_discovered_service_info() for user-initiated setup; async_step_bluetooth() for passive discovery.
+      - Errors must map to strings defined in strings.json under "config" > "error".
+      - Return ConfigFlowResult from every step method.
+
+  - pattern: "homeassistant/components/**/coordinator.py"
+    priority: 20
+    rules_text: |
+      DataUpdateCoordinator Guidelines:
+      - Inherit from DataUpdateCoordinator[T] where T is the data type (use None if no data is returned).
+      - Set update_interval in super().__init__() — never expose it to the user.
+      - Implement _async_update_data() as the single data-fetch method.
+      - Raise UpdateFailed on transient errors (retried next interval); raise ConfigEntryNotReady for setup failure.
+      - For push-based integrations: use async_update_listeners() with a Debouncer as the notify callback.
+      - Log connection failures at debug level, not warning, to avoid log spam during brief outages.
+      - Background tasks must be created via config_entry.async_create_background_task().
+      - Store coordinator on entry.runtime_data; access via entry.runtime_data in entities and platforms.
+      - type alias for the config entry: `type <Domain>ConfigEntry = ConfigEntry[<Domain>Coordinator]`.
+
+  - pattern: "homeassistant/components/**/{sensor,binary_sensor,switch,light,climate,cover,button,select,number,text,event,lock,media_player,camera,alarm_control_panel,fan,vacuum,humidifier,water_heater,siren,lawn_mower,valve,todo,calendar,image,update}.py"
+    priority: 20
+    rules_text: |
+      Entity Implementation Guidelines:
+      - All entities must have a unique_id derived from the device/config entry, not from mutable user data.
+      - Use has_entity_name = True and set name based on EntityDescription or entity translations.
+      - Assign entity_category (EntityCategory.DIAGNOSTIC or EntityCategory.CONFIG) for non-primary entities.
+      - Assign device_class where a standard device class exists for the entity type.
+      - Entities that are noisy or non-essential should be disabled by default: entity_registry_enabled_default = False.
+      - Entities should reflect unavailability: override available property and return False when device is offline.
+      - Use EntityDescription dataclasses for defining entity metadata — avoid duplicating attributes per entity.
+      - Do NOT poll inside entity update methods — delegate to DataUpdateCoordinator.
+      - async_added_to_hass() / async_will_remove_from_hass() must be symmetrical (subscriptions and teardown).
+
+  - pattern: "homeassistant/components/**/diagnostics.py"
+    priority: 25
+    rules_text: |
+      Diagnostics Platform Guidelines:
+      - Implement async_get_config_entry_diagnostics(hass, entry) to return a dict of diagnostic data.
+      - NEVER include passwords, API tokens, private keys, or sensitive user coordinates in diagnostics output.
+      - Use async_redact_data() to redact sensitive fields before returning.
+      - Diagnostics data should help debug device/integration issues — include firmware version, device state, coordinator data.
+      - Return only serializable data (str, int, float, bool, list, dict, None).
+
+  - pattern: "homeassistant/components/**/manifest.json"
+    priority: 20
+    rules_text: |
+      Integration Manifest Guidelines:
+      - Required fields: domain, name, codeowners, documentation, integration_type, iot_class, requirements.
+      - codeowners must be a list of GitHub usernames (each prefixed with @).
+      - All requirements must be available on PyPI — no local or git-based dependencies.
+      - iot_class must accurately describe the integration's communication pattern.
+      - config_flow: true is required for integrations using config entries.
+      - integration_type: device | hub | service | system | virtual | entity | helper
+      - quality_scale field: bronze | silver | gold | platinum (if declared).
+
+  - pattern: "homeassistant/components/**/quality_scale.yaml"
+    priority: 20
+    rules_text: |
+      Quality Scale File Guidelines:
+      - Every rule must have a status of done | exempt | todo.
+      - exempt rules must include a comment explaining why the rule does not apply.
+      - done rules must have the actual implementation present in the integration.
+      - Rules are cumulative by tier: Bronze rules always apply, Silver+ only for declared tier.
+
+  - pattern: "homeassistant/components/**/strings.json"
+    priority: 15
+    rules_text: |
+      Integration Strings / Translations Guidelines:
+      - strings.json is the source of truth; translations/en.json is generated — do not edit translations/en.json directly.
+      - Config flow strings must have entries under "config" > "step" > "<step_id>" > "title"/"description"/"data".
+      - Error keys used in config_flow.py must exist under "config" > "error".
+      - Abort reasons used in config_flow.py must exist under "config" > "abort".
+      - Entity names in strings.json must use sentence case (no trailing period).
+
+  - pattern: "homeassistant/components/**/__init__.py"
+    priority: 15
+    rules_text: |
+      Integration Setup Guidelines:
+      - async_setup_entry(hass, entry) must set up all platforms and store runtime_data.
+      - async_unload_entry(hass, entry) must clean up all resources (cancel tasks, close connections).
+      - Use await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS) for multi-platform setup.
+      - Use await hass.config_entries.async_unload_platforms(entry, PLATFORMS) for teardown.
+      - Raise ConfigEntryNotReady when the device/service is temporarily unavailable at setup.
+      - Raise ConfigEntryAuthFailed to trigger reauthentication flow on auth errors.
+
+  - pattern: "tests/components/**/*.py"
+    priority: 20
+    rules_text: |
+      Integration Test Guidelines:
+      - Tests must not interact with or mock internal integration implementation details.
+      - Tests should mock at the library level (the PyPI package), not at internal HA integration functions.
+      - All test function parameters must have type annotations.
+      - Prefer concrete types (HomeAssistant, MockConfigEntry) over Any.
+      - Use @pytest.mark.usefixtures instead of a function argument when the fixture is not used in the test body.
+
+  - pattern: "homeassistant/helpers/**/*.py"
+    priority: 10
+    rules_text: |
+      Core Helper Guidelines:
+      - Helpers must be generic and reusable — no integration-specific logic.
+      - All async helpers must be awaitable and must not block the event loop.
+      - Changes to helpers may affect hundreds of integrations — ensure backwards compatibility.
+      - Add deprecation warnings before removing or changing public helper APIs.
+
+  - pattern: ".github/workflows/*.{yml,yaml}"
+    priority: 5
+    rules_text: |
+      CI / Workflow Guidelines:
+      - Workflow changes must not loosen security restrictions (permissions, secrets access).
+      - All third-party actions must be pinned to a specific SHA, not a floating tag.
+      - Secrets must only be passed to trusted actions and steps that require them.
+
+llm:
+  provider: "anthropic"
+  model: "claude-sonnet-4-6"
+  temperature: 0.2
+  max_tokens: 3000
+
+rag:
+  enabled: false
+
+impact_analysis:
+  enabled: true
+  max_callers_per_function: 10
+  depth: 1
+  analyze_imports: true
+  severity_threshold: "medium"
+  exclude_patterns:
+    - "tests/**"
+    - "script/**"
+    - "homeassistant/generated/**"
+    - ".github/**"

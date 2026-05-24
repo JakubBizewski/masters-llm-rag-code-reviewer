@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
 from datetime import timedelta
@@ -29,6 +30,7 @@ class EvaluationRequest:
     pr_number: int
     history_window_days: int = 365
     max_history_prs: int = 200
+    skip_indexing: bool = False
 
 
 @dataclass
@@ -90,54 +92,61 @@ class EvaluatePullRequestUseCase:
 
         t0 = time.perf_counter()
 
-        if target_created_at is None:
-            # Can't filter by time; still index last N merged PRs excluding target
-            pr_numbers = await self.vcs_repository.list_merged_pull_requests(request.repository, limit=request.max_history_prs)
-            candidates = [n for n in pr_numbers if int(n) != int(request.pr_number)]
+        if request.skip_indexing:
+            indexing_seconds = 0.0
         else:
-            pr_numbers = await self.vcs_repository.list_merged_pull_requests(request.repository, limit=request.max_history_prs)
-            candidates = []
-            for n in pr_numbers:
-                if int(n) == int(request.pr_number):
-                    continue
-                try:
-                    pr = await self.vcs_repository.get_pull_request(request.repository, int(n))
-                except Exception:
-                    skipped_count += 1
-                    continue
+            if target_created_at is None:
+                pr_numbers = await self.vcs_repository.list_merged_pull_requests(request.repository, limit=request.max_history_prs)
+                candidates = [int(n) for n in pr_numbers if int(n) != int(request.pr_number)]
+            else:
+                pr_numbers = await self.vcs_repository.list_merged_pull_requests(request.repository, limit=request.max_history_prs)
+                candidates = []
+                for n in pr_numbers:
+                    if int(n) == int(request.pr_number):
+                        continue
+                    try:
+                        pr = await self.vcs_repository.get_pull_request(request.repository, int(n))
+                    except Exception:
+                        skipped_count += 1
+                        continue
 
-                pr_created_at = getattr(pr, "created_at", None)
-                if pr_created_at is None:
-                    skipped_count += 1
-                    continue
+                    pr_created_at = getattr(pr, "created_at", None)
+                    if pr_created_at is None:
+                        skipped_count += 1
+                        continue
 
-                if pr_created_at >= target_created_at:
-                    skipped_count += 1
-                    continue
+                    if pr_created_at >= target_created_at:
+                        skipped_count += 1
+                        continue
 
-                if pr_created_at < (target_created_at - window):
-                    skipped_count += 1
-                    continue
+                    if pr_created_at < (target_created_at - window):
+                        skipped_count += 1
+                        continue
 
-                candidates.append(int(n))
+                    candidates.append(int(n))
 
-        for n in candidates:
-            try:
-                pr = await self.vcs_repository.get_pull_request(request.repository, int(n))
-                hunks = await self.vcs_repository.get_diff_hunks(request.repository, int(n))
-                for h in hunks:
-                    pr.add_diff_hunk(h)
+            semaphore = asyncio.Semaphore(5)
 
-                discussion = await self.vcs_repository.get_pull_request_discussion_comments(request.repository, int(n))
-                for c in discussion:
-                    pr.add_discussion_comment(c)
+            async def _index_one(n: int) -> None:
+                nonlocal indexed_count, skipped_count
+                async with semaphore:
+                    try:
+                        pr = await self.vcs_repository.get_pull_request(request.repository, n)
+                        hunks = await self.vcs_repository.get_diff_hunks(request.repository, n)
+                        for h in hunks:
+                            pr.add_diff_hunk(h)
 
-                await self.embedding_store.index_review_history(pr)
-                indexed_count += 1
-            except Exception:
-                skipped_count += 1
+                        discussion = await self.vcs_repository.get_pull_request_discussion_comments(request.repository, n)
+                        for c in discussion:
+                            pr.add_discussion_comment(c)
 
-        indexing_seconds = time.perf_counter() - t0
+                        await self.embedding_store.index_review_history(pr)
+                        indexed_count += 1
+                    except Exception:
+                        skipped_count += 1
+
+            await asyncio.gather(*(_index_one(n) for n in candidates))
+            indexing_seconds = time.perf_counter() - t0
 
         embedding_index_tokens = 0
         if hasattr(self.embedding_store, "stats"):

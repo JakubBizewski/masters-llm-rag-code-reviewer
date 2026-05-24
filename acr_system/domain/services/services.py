@@ -273,11 +273,11 @@ class ReviewOrchestrator:
             List of changed functions
         """
         try:
-            # Get the full file content after the change
+            # Get file content at the PR's head commit, not the current branch tip.
             file_content = await self.vcs_repository.get_file_content(
                 repo=pr.repository,
                 file_path=diff_hunk.file_path.value,
-                ref=pr.source_branch,
+                ref=pr.head_sha or pr.source_branch,
             )
             
             # Extract changed functions using AST parser
@@ -312,7 +312,8 @@ class ReviewOrchestrator:
                     function_name=func.name,
                     file_path=func.file_path,
                     language=func.language,
-                    repo_path=pr.repository,
+                    repository=pr.repository,
+                    ref=pr.head_sha or pr.source_branch,
                 )
                 
                 # Skip if no callers found (not used elsewhere)

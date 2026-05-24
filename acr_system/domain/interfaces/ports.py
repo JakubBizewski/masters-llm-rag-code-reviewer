@@ -232,6 +232,7 @@ class CallGraphAnalyzer(ABC):
         file_path: FilePath,
         repository: str,
         language: Language,
+        ref: str = "HEAD",
     ) -> List[CallSite]:
         """Find all places where a function is called (1 level deep).
         
@@ -278,6 +279,7 @@ class CallGraphAnalyzer(ABC):
         file_path: FilePath,
         repository: str,
         language: Language,
+        ref: str = "HEAD",
     ) -> List[ImportSite]:
         """Find all files that import from a given module (1 level deep).
         

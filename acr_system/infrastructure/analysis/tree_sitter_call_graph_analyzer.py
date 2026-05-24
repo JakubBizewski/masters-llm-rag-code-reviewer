@@ -77,6 +77,7 @@ class TreeSitterCallGraphAnalyzer(CallGraphAnalyzer):
         file_path: FilePath,
         repository: str,
         language: Language,
+        ref: str = "HEAD",
     ) -> List[CallSite]:
         """Find all places where a function is called (1 level deep).
         
@@ -119,7 +120,7 @@ class TreeSitterCallGraphAnalyzer(CallGraphAnalyzer):
                     file_content = await self.vcs.get_file_content(
                         repo=repository,
                         file_path=candidate_file,
-                        ref="HEAD"
+                        ref=ref,
                     )
                     
                     # Verify: Is it a call site? (not definition/comment/string)
@@ -164,6 +165,7 @@ class TreeSitterCallGraphAnalyzer(CallGraphAnalyzer):
         file_path: FilePath,
         repository: str,
         language: Language,
+        ref: str = "HEAD",
     ) -> List[ImportSite]:
         """Find all files that import from a given module (1 level deep).
         
@@ -213,7 +215,7 @@ class TreeSitterCallGraphAnalyzer(CallGraphAnalyzer):
                         file_content = await self.vcs.get_file_content(
                             repo=repository,
                             file_path=candidate_file,
-                            ref="HEAD"
+                            ref=ref,
                         )
                         
                         # Extract imported names from AST

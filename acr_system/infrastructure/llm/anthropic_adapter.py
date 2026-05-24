@@ -19,6 +19,7 @@ from acr_system.domain.entities.entities import (
 )
 from acr_system.domain.interfaces.ports import LLMProvider
 from acr_system.domain.value_objects.value_objects import FilePath, Severity
+from acr_system.infrastructure.llm._json_utils import extract_json_object as _extract_json_object
 from acr_system.shared.exceptions.infrastructure_exceptions import LLMProviderError
 from acr_system.shared.logging.logger import get_logger
 
@@ -217,20 +218,16 @@ Anchor by issue type:
     ) -> List[ReviewComment]:
         """Parse LLM response into ReviewComment objects."""
         import json
-        
+
         if not response:
             return []
-        
+
         try:
-            # Try to extract JSON from response
-            start = response.find('{')
-            end = response.rfind('}') + 1
-            
-            if start == -1 or end == 0:
+            json_str = _extract_json_object(response)
+            if json_str is None:
                 logger.warning("No JSON found in LLM response")
                 return []
-            
-            json_str = response[start:end]
+
             data = json.loads(json_str)
             
             comments = []
@@ -357,9 +354,10 @@ Anchor by issue type:
             
             # Parse response
             import json
-            start = result.find('{')
-            end = result.rfind('}') + 1
-            json_str = result[start:end]
+            json_str = _extract_json_object(result)
+            if json_str is None:
+                logger.warning("No JSON found in CI parsing response")
+                return []
             data = json.loads(json_str)
             
             issues = []

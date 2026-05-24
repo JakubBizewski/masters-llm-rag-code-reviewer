@@ -64,10 +64,11 @@ def review(
     show_default=False,
     help="Optional provider override; otherwise inferred from --repo when it's a URL",
 )
-def index_history(repo: str, max_prs: int, provider: Optional[str]) -> None:
+@click.option("--faiss-index-path", default=None, help="Path for the FAISS index (overrides RAG_FAISS_INDEX_PATH env var)")
+def index_history(repo: str, max_prs: int, provider: Optional[str], faiss_index_path: Optional[str]) -> None:
     """Index historical merged PR changes (diff + comments) for a repository."""
     chosen_provider = provider.lower() if provider else _infer_provider_from_repo_arg(repo)
-    asyncio.run(_index_history_async(repo, max_prs, chosen_provider))
+    asyncio.run(_index_history_async(repo, max_prs, chosen_provider, faiss_index_path))
 
 
 @cli.command("evaluate")
@@ -76,9 +77,19 @@ def index_history(repo: str, max_prs: int, provider: Optional[str]) -> None:
 @click.option("--report-path", default="./acr_eval_report.json", show_default=True, help="Where to write JSON report")
 @click.option("--history-window-days", default=365, show_default=True, type=int, help="Index only PRs up to N days older than target")
 @click.option("--max-history-prs", default=200, show_default=True, type=int, help="Max merged PRs to consider for history indexing")
-def evaluate(pr_url: str, config_path: str, report_path: str, history_window_days: int, max_history_prs: int) -> None:
+@click.option("--faiss-index-path", default=None, help="Path for the FAISS index (overrides RAG_FAISS_INDEX_PATH env var)")
+@click.option("--skip-indexing", is_flag=True, default=False, help="Skip the history indexing stage (use pre-built index or no-RAG run)")
+def evaluate(
+    pr_url: str,
+    config_path: str,
+    report_path: str,
+    history_window_days: int,
+    max_history_prs: int,
+    faiss_index_path: Optional[str],
+    skip_indexing: bool,
+) -> None:
     """Experimental evaluation: index PR history, run review, write report."""
-    asyncio.run(_evaluate_async(pr_url, config_path, report_path, history_window_days, max_history_prs))
+    asyncio.run(_evaluate_async(pr_url, config_path, report_path, history_window_days, max_history_prs, faiss_index_path, skip_indexing))
 
 
 async def _review_async(
@@ -275,15 +286,15 @@ def _infer_provider_from_repo_arg(repo: str) -> str:
     return "github"
 
 
-async def _index_history_async(repo: str, max_prs: int, provider: str) -> None:
+async def _index_history_async(repo: str, max_prs: int, provider: str, faiss_index_path: Optional[str] = None) -> None:
     try:
         canonical_repo = _parse_repo_arg(repo, provider)
         click.echo(f"Indexing merged PR history for {canonical_repo} (max {max_prs})")
 
-        vcs_adapter, _ = _create_adapters(provider)
+        vcs_adapter = _create_vcs_adapter(provider)
 
         embedding_model = os.getenv("RAG_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-        rag_storage_path = os.getenv("RAG_FAISS_INDEX_PATH", "./faiss_index")
+        rag_storage_path = faiss_index_path or os.getenv("RAG_FAISS_INDEX_PATH", "./faiss_index")
         rag_store = FAISSStore(
             embedding_model_name=embedding_model,
             storage_path=rag_storage_path,
@@ -351,8 +362,39 @@ def _parse_repo_arg(repo: str, provider: str) -> str:
     return value
 
 
+def _create_vcs_adapter(provider: str) -> GitHubAdapter | GitLabAdapter:
+    """Create a VCS adapter, preferring token auth over GitHub App auth."""
+    if provider == "github":
+        gh_token = os.getenv("GITHUB_TOKEN")
+        if gh_token:
+            return GitHubAdapter(token=gh_token)
+
+        app_id = os.getenv("GITHUB_APP_ID")
+        private_key_path = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH")
+        installation_id = os.getenv("GITHUB_APP_INSTALLATION_ID")
+        if not app_id or not private_key_path:
+            raise ValueError(
+                "For GitHub set either GITHUB_TOKEN or (GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH)"
+            )
+        auth = GitHubAppAuth(
+            app_id=app_id,
+            private_key_path=private_key_path,
+            installation_id=installation_id,
+        )
+        return GitHubAdapter(auth=auth)
+
+    if provider == "gitlab":
+        token = os.getenv("GITLAB_TOKEN")
+        api_base = os.getenv("GITLAB_API_BASE", "https://gitlab.com/api/v4")
+        if not token:
+            raise ValueError("GITLAB_TOKEN must be set")
+        return GitLabAdapter(token=token, api_base=api_base)
+
+    raise ValueError(f"Unsupported provider: {provider}")
+
+
 def _create_adapters(provider: str) -> tuple[GitHubAdapter | GitLabAdapter, GitHubChecksAdapter | GitLabCIAdapter]:
-    """Create VCS + CI adapters based on provider."""
+    """Create VCS + CI adapters based on provider (requires GitHub App auth for CI checks)."""
     if provider == "github":
         app_id = os.getenv("GITHUB_APP_ID")
         private_key_path = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH")
@@ -386,46 +428,21 @@ async def _evaluate_async(
     report_path: str,
     history_window_days: int,
     max_history_prs: int,
+    faiss_index_path: Optional[str] = None,
+    skip_indexing: bool = False,
 ) -> None:
     try:
         repo, pr_number, provider = _parse_pr_url(pr_url)
         click.echo(f"Evaluating historical PR #{pr_number} in {repo} ({provider})")
 
-        # Experimental evaluation intentionally skips CI fetching to keep metrics focused
-        # on RAG/indexing + LLM review quality/cost.
-        if provider == "github":
-            gh_token = os.getenv("GITHUB_TOKEN")
-            if gh_token:
-                vcs_adapter = GitHubAdapter(token=gh_token)
-            else:
-                app_id = os.getenv("GITHUB_APP_ID")
-                private_key_path = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH")
-                installation_id = os.getenv("GITHUB_APP_INSTALLATION_ID")
-                if not app_id or not private_key_path:
-                    raise ValueError(
-                        "For GitHub evaluation set either GITHUB_TOKEN or (GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH)"
-                    )
-                auth = GitHubAppAuth(
-                    app_id=app_id,
-                    private_key_path=private_key_path,
-                    installation_id=installation_id,
-                )
-                vcs_adapter = GitHubAdapter(auth=auth)
-        elif provider == "gitlab":
-            token = os.getenv("GITLAB_TOKEN")
-            api_base = os.getenv("GITLAB_API_BASE", "https://gitlab.com/api/v4")
-            if not token:
-                raise ValueError("GITLAB_TOKEN must be set")
-            vcs_adapter = GitLabAdapter(token=token, api_base=api_base)
-        else:
-            raise ValueError(f"Unsupported provider: {provider}")
+        vcs_adapter = _create_vcs_adapter(provider)
 
         # Local config override
         config_loader = FileYAMLConfigLoader(config_path=config_path)
 
         # RAG store (persistent)
         embedding_model = os.getenv("RAG_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-        rag_storage_path = os.getenv("RAG_FAISS_INDEX_PATH", "./faiss_index")
+        rag_storage_path = faiss_index_path or os.getenv("RAG_FAISS_INDEX_PATH", "./faiss_index")
         rag_store = FAISSStore(
             embedding_model_name=embedding_model,
             storage_path=rag_storage_path,
@@ -474,6 +491,7 @@ async def _evaluate_async(
                 pr_number=pr_number,
                 history_window_days=history_window_days,
                 max_history_prs=max_history_prs,
+                skip_indexing=skip_indexing,
             )
         )
 

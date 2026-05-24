@@ -1,0 +1,200 @@
+# ACR Configuration for microsoft/vscode — NO RAG variant
+# Use this config for the "without RAG" baseline evaluation runs.
+# Identical to .acr-config.yml except rag.enabled is false everywhere.
+
+review:
+  enabled: true
+
+global_rules:
+  - name: "security"
+    enabled: true
+    rules_text: |
+      Security Review Guidelines:
+      - Check for command injection in shell invocations and terminal integrations
+      - Check for XSS vulnerabilities in webview content and HTML rendering
+      - Validate and sanitize all user inputs and extension-provided data
+      - Check for hardcoded secrets, tokens, or credentials
+      - Ensure proper authentication checks in server endpoints
+      - Verify that telemetry data never includes PII (usernames, file paths, content)
+      - Check for path traversal vulnerabilities in file system operations
+      - Ensure webview sandboxing is properly configured (no unnecessary permissions)
+
+  - name: "code_quality"
+    enabled: true
+    rules_text: |
+      VS Code Code Quality Guidelines:
+      - All source files must include the Microsoft copyright header
+      - Use tabs, not spaces, for indentation
+      - PascalCase for types and enum values; camelCase for functions, methods, properties, and local variables
+      - Use whole words in names; avoid unexplained abbreviations
+      - Use JSDoc-style comments for functions, interfaces, enums, and classes
+      - Prefer async/await over Promise.then()
+      - Never use `any` or `unknown` unless absolutely necessary
+      - Prefer named regex capture groups over numbered ones
+      - No duplicate imports; remove blank lines left by removed imports
+      - Avoid bind()/call()/apply() solely for `this` — prefer arrow functions
+      - Avoid events for control flow between components; prefer direct method calls
+      - Use IEditorService to open editors — never IEditorGroupsService.activeGroup.openEditor
+      - Do not duplicate code; reuse existing utility functions and patterns
+
+  - name: "disposables"
+    enabled: true
+    rules_text: |
+      Disposable Lifecycle Guidelines:
+      - Register disposables immediately after creation: `const x = this._register(new X())`
+      - Use DisposableStore, MutableDisposable, or DisposableMap as appropriate
+      - Never register a disposable to `this` if it is created inside a repeatedly-called method — return it instead
+      - Call sinon.restore() in teardown to avoid mock leaks
+
+  - name: "localization"
+    enabled: true
+    rules_text: |
+      Localization Guidelines:
+      - All user-visible strings must be externalized via nls.localize()
+      - Never use string concatenation in localized strings; use {0} placeholders instead
+      - Use "double quotes" for strings that need localization; 'single quotes' for everything else
+      - UI labels: Title Case for commands/buttons/menu items; Sentence case for view titles/headings
+      - Do not capitalize prepositions of four or fewer letters unless first or last word
+
+file_patterns:
+  - pattern: "src/vs/**/*.ts"
+    priority: 10
+    rules_text: |
+      VS Code TypeScript Source Guidelines:
+
+      ## Layering (must not be violated)
+      - base → platform → editor → workbench → code/server/sessions
+      - Within each layer: common < browser < node < electron-browser < electron-utility < electron-main
+      - No dependency from outside contrib/ into contrib/
+      - Each contribution has a single .contribution.ts entry point
+      - Cross-contribution dependencies use the common API file — never reach into internals
+      - vs/workbench must NEVER import from vs/sessions
+
+      ## Dependency Injection
+      - Services must be declared in constructors via DI decorators
+      - Never access services through IInstantiationService outside of constructors
+      - Non-service constructor parameters must come before service parameters
+
+      ## Style
+      - Arrow functions over anonymous function expressions
+      - Only parenthesize arrow function parameters when necessary: `x => x + x` not `(x) => x + x`
+      - Always surround loop and conditional bodies with curly braces
+      - Open curly braces on the same line
+      - No surrounding whitespace in parenthesized constructs
+      - Prefer `export function x(…)` over `export const x = (…) =>` at top-level scope (better stack traces)
+
+      ## Observables (when using the observable pattern)
+      - Use observableValue(owner, initialValue) for regular values
+      - Use disposableObservableValue(owner, initialValue) when storing disposable values
+      - Use observableFromEvent when you need to track a computed value that changes with the event
+      - Use observableSignalFromEvent when you need to force re-computation every time the event fires
+      - Use transaction(tx => {...}) whenever multiple observables are synchronously updated together
+      - Model session/feature state as observables, not onDid* events
+    llm_config:
+      provider: "anthropic"
+      model: "claude-sonnet-4-6"
+      temperature: 0.2
+      max_tokens: 3000
+    rag_config:
+      enabled: false
+
+  - pattern: "{src/vs/**/test/**/*.ts,src/vs/**/*.test.ts,src/vs/**/*.integrationTest.ts}"
+    priority: 20
+    rules_text: |
+      VS Code Test Guidelines:
+
+      ## Test Types
+      - Unit tests: *.test.ts — run in browser, Electron, or Node (depends on layer)
+      - Integration tests: *.integrationTest.ts — use real external APIs
+      - Never run tests if there are compilation errors
+
+      ## Clean Teardown
+      - Always use ensureNoDisposablesAreLeakedInTestSuite() to catch disposal leaks
+      - Always call sinon.restore() in teardown
+
+      ## Best Practices
+      - Minimize assertions per test — prefer one assert.deepStrictEqual snapshot over many fine-grained assertions
+      - Do not add tests to the wrong suite; find the correct suite block
+      - Follow existing patterns (describe/test or suite/test) consistently within a file
+      - Do not stub globals (e.g. (mainWindow as any).X = ...) — make dependencies injectable instead
+    llm_config:
+      temperature: 0.2
+      max_tokens: 2000
+
+  - pattern: "src/vs/sessions/**/*.ts"
+    priority: 25
+    rules_text: |
+      Agents Window (vs/sessions) Guidelines:
+
+      ## Layering
+      - vs/sessions imports from vs/workbench and below — never the reverse
+      - Internal: Entry Points → contrib/* / services/* → browser/ & common/ (core)
+      - contrib/* must NOT import from contrib/providers/*
+
+      ## State
+      - Model session state as IObservable — not onDid* events
+      - Batch state updates with transaction(tx => {...})
+      - Always import contributions in the entry points
+    llm_config:
+      temperature: 0.2
+      max_tokens: 2500
+
+  - pattern: "src/vs/workbench/contrib/chat/**/*.ts"
+    priority: 15
+    rules_text: |
+      Chat Feature Guidelines:
+      - All new chat/AI features must be gated on ChatContextKeys.enabled via a when clause
+      - Check IChatEntitlementService.sentiment.hidden for programmatic hiding
+      - Never show AI features when chat.disableAIFeatures is set
+      - New surfaces that expose agents or chat must respect the AI disable setting
+
+  - pattern: "src/vs/**/*telemetry*/**/*.ts"
+    priority: 15
+    rules_text: |
+      Telemetry Guidelines (GDPR compliance required):
+      - SystemMetaData: non-personal system info, preferences, feature usage, identifiers (most common)
+      - CallstackOrException: error messages, stack traces — only for actual error information
+      - Required fields in every classification type: comment, owner, isMeasurement (for numeric values)
+      - No PII: no usernames, emails, file paths, or content
+      - Do not omit the owner field
+
+  - pattern: "extensions/*/package.json"
+    priority: 10
+    rules_text: |
+      Extension Manifest Guidelines:
+      - No secrets or credentials in extension manifests
+      - Verify proposed API version numbers match corresponding .d.ts files
+      - Check activation events are not overly broad (avoid * activation)
+      - Contribution points must include proper when clauses for AI/chat features
+
+  - pattern: "**/*.{yml,yaml,json}"
+    priority: 5
+    rules_text: |
+      Configuration File Guidelines:
+      - No secrets or credentials in config files
+      - Use environment variables for sensitive data
+      - Validate JSON/YAML syntax
+
+llm:
+  provider: "anthropic"
+  model: "claude-sonnet-4-6"
+  temperature: 0.2
+  max_tokens: 3000
+
+rag:
+  enabled: false
+
+impact_analysis:
+  enabled: true
+  max_callers_per_function: 10
+  depth: 1
+  analyze_imports: true
+  severity_threshold: "medium"
+  exclude_patterns:
+    - "src/vs/**/test/**"
+    - "**/*.test.ts"
+    - "**/*.integrationTest.ts"
+    - "out/**"
+    - "out-build/**"
+    - "out-vscode*/**"
+    - ".build/**"
