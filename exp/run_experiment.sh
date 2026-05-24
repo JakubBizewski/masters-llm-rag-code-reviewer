@@ -32,6 +32,7 @@ fi
 declare -A REPO_CONFIG
 REPO_CONFIG["home-assistant/core"]="$SCRIPT_DIR/home-assistant|$SCRIPT_DIR/home-assistant/.acr-config.yml|$SCRIPT_DIR/home-assistant/.acr-config-no-rag.yml|$PROJECT_ROOT/faiss_index_home_assistant"
 REPO_CONFIG["microsoft/vscode"]="$SCRIPT_DIR/vscode|$SCRIPT_DIR/vscode/.acr-config.yml|$SCRIPT_DIR/vscode/.acr-config-no-rag.yml|$PROJECT_ROOT/faiss_index_vscode"
+REPO_CONFIG["getsentry/sentry"]="$SCRIPT_DIR/sentry|$SCRIPT_DIR/sentry/.acr-config.yml|$SCRIPT_DIR/sentry/.acr-config-no-rag.yml|$PROJECT_ROOT/faiss_index_sentry"
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 extract_repo() {

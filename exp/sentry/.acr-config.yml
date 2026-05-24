@@ -1,0 +1,425 @@
+# ACR Configuration for getsentry/sentry
+# Generated from AGENTS.md, src/AGENTS.md, tests/AGENTS.md, static/AGENTS.md,
+# pyproject.toml (ruff/mypy), setup.cfg (flake8), and eslint.config.ts.
+# Place this file (.acr-config.yml) in the root of the sentry repository.
+
+review:
+  enabled: true
+
+# ──────────────────────────────────────────────
+# Global rules — applied to every reviewed file
+# ──────────────────────────────────────────────
+global_rules:
+  - name: "security"
+    enabled: true
+    rules_text: |
+      Security Review Guidelines (Sentry-specific):
+      - IDOR prevention: every database query that touches org/project/user data MUST be
+        scoped by organization_id AND/OR project_id. Never trust request.data["project_id"]
+        directly — use self.get_projects(), self.get_organization(), or equivalent helpers.
+      - Never expose internal IDs (database PKs) in API responses without permission checks.
+      - Do not include customer data, PII, or real org/project names in code, comments, or tests.
+        Use synthetic examples only.
+      - Validate all user-supplied input through DRF serializers or explicit validators before use.
+      - Do not swallow exceptions with bare `except Exception: pass` or silent catch-all handlers.
+      - Error responses must use the "detail" key (DRF standard). Never invent non-standard shapes.
+      - Authentication checks: new endpoints must inherit from the correct base class
+        (OrganizationEndpoint, ProjectEndpoint, RegionSiloEndpoint, ControlSiloEndpoint)
+        and not bypass permission enforcement.
+      - Never log sensitive user data, tokens, or credentials. Use structured logging with
+        sanitised `extra` fields.
+
+  - name: "code_quality"
+    enabled: true
+    rules_text: |
+      Code Quality Guidelines (Sentry-specific):
+      - Python line length is 100 characters (ruff/pyproject.toml). Flag lines exceeding this.
+      - Use double quotes for Python strings (ruff format configuration).
+      - All Python code must be fully typed: type annotations on every function parameter and
+        return value. mypy is run in strict mode (disallow_untyped_defs = true,
+        disallow_any_generics = true, no_implicit_reexport = true).
+      - Use abstract types for function inputs (Sequence[T], Mapping[K, V], Iterable[T])
+        and specific concrete types for return values (list[T], dict[K, V]).
+      - Import from collections.abc (not typing) for abstract container types.
+      - Do not import inside function bodies except to break genuine circular imports.
+        Document any such exception inline.
+      - Comments must explain WHY, never WHAT. No obvious/redundant comments.
+        Reserve for non-obvious constraints, workarounds, or external references.
+      - Use logger.exception() inside exception handlers (not logger.error()).
+        Use %-formatting for log messages (lazy evaluation), not f-strings or .format().
+      - Do not add second default argument to options.get("key") — all defaults are
+        registered in src/sentry/options/defaults.py.
+      - Prefer isinstance() over hasattr() for type narrowing.
+
+  - name: "performance"
+    enabled: true
+    rules_text: |
+      Performance Review Guidelines (Sentry-specific):
+      - N+1 queries: NEVER call database methods inside loops or inside a serializer's
+        serialize() method. All bulk queries must happen in the get_attrs() method.
+      - Use select_related() and prefetch_related() for foreign-key traversals.
+      - API endpoints that return lists must be paginated with cursor-based pagination.
+      - Database indexes: composite indexes must match the query filter column order.
+        Check for missing indexes on multi-column filters or range queries on tables > 1M rows.
+      - Celery tasks must not perform unbounded queries. Use chunking/batching for large datasets.
+      - Use structured analytics events (analytics.record(Event(...))) — do not block the
+        request thread on analytics I/O.
+
+# ──────────────────────────────────────────────
+# File-specific rules
+# ──────────────────────────────────────────────
+file_patterns:
+
+  # ── API Endpoints ───────────────────────────
+  - pattern: "src/sentry/api/endpoints/**/*.py"
+    priority: 20
+    rules_text: |
+      API Endpoint Guidelines:
+      - Every endpoint must inherit from the correct base class:
+        OrganizationEndpoint, ProjectEndpoint, RegionSiloEndpoint, or ControlSiloEndpoint.
+        Direct APIView is rarely correct for new code.
+      - All DB queries must be scoped by organization_id or project_id sourced from the
+        endpoint helper methods (self.get_organization(), self.get_projects()).
+        Never trust raw request.data["project_id"] or request.GET["project_id"].
+      - Response shape: use "detail" key for all error messages. Successful responses
+        return serialized data via Response(serializer.data).
+      - Paginate all list endpoints using CursorPaginator or OffsetPaginator.
+        Never return unbounded querysets.
+      - Permission classes must be declared; the base class default is NOT sufficient
+        when additional scopes are required.
+      - URL pattern must be registered in src/sentry/api/urls.py.
+      - New endpoints require a corresponding test in tests/sentry/api/endpoints/test_{name}.py.
+      - Document the endpoint with drf-spectacular decorators (@extend_schema) if it is
+        part of the public API.
+      - For Hybrid Cloud: endpoints that touch cross-silo data must use outbox patterns
+        or RpcService calls — never direct cross-database joins.
+    llm_config:
+      provider: "anthropic"
+      model: "claude-sonnet-4-6"
+      temperature: 0.2
+      max_tokens: 3000
+    rag_config:
+      enabled: true
+      top_k: 5
+      documentation_paths:
+        - "src/AGENTS.md"
+        - "AGENTS.md"
+      architectural_docs:
+        - "src/AGENTS.md"
+
+  # ── Serializers ─────────────────────────────
+  - pattern: "src/sentry/api/serializers/**/*.py"
+    priority: 20
+    rules_text: |
+      Serializer Guidelines:
+      - CRITICAL: Never query the database inside serialize(). All bulk data fetching
+        must happen in get_attrs(). The serialize() method receives pre-fetched attrs
+        and must only transform/format data.
+      - get_attrs() must batch-fetch related objects for all items at once (one query
+        per relationship, not one per item).
+      - Use type annotations on all methods. The return type of get_attrs() must be
+        a TypedDict or dict[str, Any] consistently applied.
+      - Do not expose internal database IDs without explicit intent and permission checks.
+      - If a field is conditionally present based on permissions, document the condition.
+    llm_config:
+      provider: "anthropic"
+      model: "claude-sonnet-4-6"
+      temperature: 0.2
+      max_tokens: 2500
+    rag_config:
+      enabled: true
+      top_k: 5
+      documentation_paths:
+        - "src/AGENTS.md"
+
+  # ── Django Models ────────────────────────────
+  - pattern: "src/sentry/models/**/*.py"
+    priority: 15
+    rules_text: |
+      Django Model Guidelines:
+      - All new fields must have a corresponding migration that is backwards compatible.
+        Never drop a column in the same migration that removes the model field — use a
+        two-step process (remove field first, drop column later).
+      - Composite database indexes must be declared in Meta.indexes and the field order
+        must match the query filter order.
+      - Do not add non-nullable columns to large tables without a backfill strategy.
+      - Model methods that query related data must use select_related/prefetch_related
+        or be batch-friendly (accepting queryset input rather than individual instances).
+      - Use sentry_sdk.set_tag / structured logging for observability — not print().
+      - Silo mode: annotate models with @control_silo_model or @region_silo_model as
+        appropriate. Cross-silo references must use outbox patterns.
+    llm_config:
+      provider: "anthropic"
+      model: "claude-sonnet-4-6"
+      temperature: 0.2
+      max_tokens: 2500
+    rag_config:
+      enabled: true
+      top_k: 3
+      documentation_paths:
+        - "src/AGENTS.md"
+
+  # ── Database Migrations ──────────────────────
+  - pattern: "src/sentry/**/migrations/*.py"
+    priority: 25
+    rules_text: |
+      Database Migration Guidelines:
+      - Every migration must be backwards compatible. The old code must be able to run
+        against the new schema and vice versa.
+      - Never drop a column immediately. Step 1: remove the model field and deploy.
+        Step 2: drop the column in a follow-up migration after rollout.
+      - Never add a non-nullable column without a DEFAULT or a backfill migration.
+      - Squashed migrations must not break the rollback path.
+      - The migrations_lockfile.txt must be updated when adding/modifying migrations
+        (run ./bin/update-migration if there are conflicts).
+      - Adding an index to a large table (> 1M rows) requires CONCURRENTLY. Verify the
+        migration uses RunSQL with CREATE INDEX CONCURRENTLY or equivalent Django support.
+      - Never include data migrations and schema migrations in the same file.
+    llm_config:
+      provider: "anthropic"
+      model: "claude-sonnet-4-6"
+      temperature: 0.1
+      max_tokens: 2000
+
+  # ── Celery Tasks ─────────────────────────────
+  - pattern: "src/sentry/tasks/**/*.py"
+    priority: 15
+    rules_text: |
+      Celery Task Guidelines:
+      - All tasks must use the @instrumented_task decorator (not @app.task or @shared_task).
+        Required arguments: name, queue, max_retries (or acks_late=True for at-least-once).
+      - Task names must be globally unique and descriptive.
+      - Tasks must be idempotent — safe to retry on failure without side effects.
+      - Never perform unbounded queries in a task. Use pagination or chunking for large datasets.
+      - Do not pass large payloads (model instances, querysets) as task arguments —
+        pass IDs and reload inside the task.
+      - Use self.retry(exc=exc, countdown=...) for transient failures. Capture permanent
+        failures with Sentry SDK.
+      - Tasks that send external requests must respect rate limits and timeouts.
+      - Test tasks synchronously using CELERY_TASK_ALWAYS_EAGER=True or
+        task.apply() in tests — do not test asynchronous scheduling in unit tests.
+
+  # ── Backend Tests ────────────────────────────
+  - pattern: "tests/sentry/**/*.py"
+    priority: 20
+    rules_text: |
+      Backend Test Guidelines (from tests/AGENTS.md):
+      - Use pytest (not unittest). All test files must contain pytest-style test functions
+        or classes that inherit from TestCase (via sentry.testutils).
+      - ALWAYS use factory methods (self.create_project(), self.create_organization(),
+        self.create_user(), etc.) — never Model.objects.create() directly.
+      - Tests must mirror the source structure: src/sentry/foo/bar.py →
+        tests/sentry/foo/test_bar.py.
+      - No branching or conditional logic inside test functions. If coverage of multiple
+        paths is needed, write separate test functions or use @pytest.mark.parametrize.
+      - Never hardcode the current year, future year, or absolute timestamps at module
+        or class scope. Use before_now(), after_now(), or freeze_time() utilities.
+      - Do not test implementation details — test observable behaviour and API contracts.
+      - Snuba tests belong in tests/snuba/ and are run in a separate CI job.
+      - Arroyo/Kafka tests must use LocalProducer with MemoryMessageStorage, not mocks.
+      - Each test must clean up its own side effects (use pytest fixtures / teardown).
+    llm_config:
+      provider: "anthropic"
+      model: "claude-sonnet-4-6"
+      temperature: 0.2
+      max_tokens: 2500
+    rag_config:
+      enabled: true
+      top_k: 3
+      documentation_paths:
+        - "tests/AGENTS.md"
+        - "src/AGENTS.md"
+
+  # ── Feature Flags ────────────────────────────
+  - pattern: "src/sentry/features/**/*.py"
+    priority: 15
+    rules_text: |
+      Feature Flag Guidelines:
+      - New features must be registered in src/sentry/features/temporary.py (for
+        rollout features) or permanent.py (for permanent capability flags).
+      - Registration format: manager.add("organizations:my-feature", OrganizationFeature,
+        FeatureHandlerStrategy.FLAGPOLE, api_expose=True)
+      - Python check: features.has("organizations:my-feature", organization, actor=user)
+      - Frontend check: organization.features.includes('my-feature')
+      - Tests: wrap assertions in `with self.feature("organizations:my-feature"): ...`
+      - Never gate features using options.get() directly — use the FlagPole system.
+      - api_expose=True required for flags that the frontend reads from the API response.
+
+  # ── React/TypeScript Components ──────────────
+  - pattern: "static/app/components/**/*.tsx"
+    priority: 15
+    rules_text: |
+      React Component Guidelines (from static/AGENTS.md):
+      - Function components only. Class components are forbidden in new code.
+      - Always use TypeScript. Never use .js or .jsx for new component files.
+      - Use core design system components from @sentry/scraps before reaching for
+        custom Emotion-styled components. Check that a core component doesn't already
+        cover the use case.
+      - Layout: use Flex, Grid, Container primitives. Prefer gap/padding props over margin.
+        Use responsive props (direction={{xs: 'column', md: 'row'}}) instead of media queries.
+      - Typography: use Heading and Text components, not styled h1-h6 or span. Use the
+        `as` prop for semantic HTML without changing visual style.
+      - Icons: import from static/app/icons. Never inline SVGs or use img tags for icons.
+      - Images: import via the sentry-images/* loader alias. Never hardcode asset paths.
+      - No new Reflux stores. For new state management, use TanStack Query or React state.
+      - No CSS files. Use core components or Emotion css`` for edge cases.
+      - Register disposables / event listeners via useEffect return cleanup.
+    llm_config:
+      provider: "anthropic"
+      model: "claude-sonnet-4-6"
+      temperature: 0.2
+      max_tokens: 3000
+    rag_config:
+      enabled: true
+      top_k: 5
+      documentation_paths:
+        - "static/AGENTS.md"
+        - "AGENTS.md"
+      architectural_docs:
+        - "static/AGENTS.md"
+
+  # ── React/TypeScript Views (Pages) ───────────
+  - pattern: "static/app/views/**/*.tsx"
+    priority: 15
+    rules_text: |
+      React View / Page Guidelines:
+      - Routes must be lazy-loaded: export default React.lazy(() => import('./myView')).
+      - API data fetching: use apiOptions with TanStack Query useQuery. NEVER use the
+        deprecated useApiQuery, getApiQueryData, or setApiQueryData.
+      - staleTime is REQUIRED in every useQuery call. Omitting it is a bug.
+      - Build helper functions that return options objects (e.g. myResourceOptions()),
+        do NOT wrap useQuery in a hook unless truly necessary.
+      - For responses that include headers (pagination, etc.): use the selectJsonWithHeaders
+        override — never manually parse response headers.
+      - Use React Router v6 hooks (useNavigate, useParams, useLocation) — not history push.
+      - Every view that fetches data must handle loading and error states.
+      - Feature-flag new views: wrap with features.has() / organization.features.includes().
+    llm_config:
+      provider: "anthropic"
+      model: "claude-sonnet-4-6"
+      temperature: 0.2
+      max_tokens: 3000
+    rag_config:
+      enabled: true
+      top_k: 5
+      documentation_paths:
+        - "static/AGENTS.md"
+
+  # ── Frontend Tests ───────────────────────────
+  - pattern: "{static/app/**/*.spec.tsx,tests/js/**/*.spec.tsx,tests/js/**/*.spec.ts}"
+    priority: 20
+    rules_text: |
+      Frontend Test Guidelines (from static/AGENTS.md):
+      - Import from sentry-test/reactTestingLibrary, never from @testing-library/react.
+      - Query priority: getByRole > getByLabelText > getByPlaceholderText > getByText > getByTestId.
+        Using getByTestId for things accessible by role is a test quality issue.
+      - Use screen (not destructured queries). Write `screen.getByRole(...)`, not
+        const { getByRole } = render(...).
+      - Use findBy* for async elements (await screen.findByRole(...)).
+        Use queryBy* only to assert non-existence.
+      - Always await async assertions: await waitFor(() => expect(...).toBeInTheDocument()).
+      - Mock API responses with MockApiClient.addMockResponse() — never mock fetch directly.
+      - Use fixtures from sentry-fixture/* for consistent test data.
+      - Test user-visible behaviour, not implementation details. Do not assert on
+        internal state or component internals.
+      - Each test must describe one scenario with a clear, user-centric name.
+    llm_config:
+      provider: "anthropic"
+      model: "claude-sonnet-4-6"
+      temperature: 0.2
+      max_tokens: 2500
+    rag_config:
+      enabled: true
+      top_k: 3
+      documentation_paths:
+        - "static/AGENTS.md"
+        - "tests/AGENTS.md"
+
+  # ── TypeScript source (non-component) ────────
+  - pattern: "static/app/{utils,stores,actionCreators,types}/**/*.{ts,tsx}"
+    priority: 10
+    rules_text: |
+      TypeScript Utility / Store Guidelines:
+      - Strict TypeScript: no `any` or `unknown` without a documented justification.
+      - No new Reflux stores. Migrate existing Reflux state to React Query or React
+        context as changes are made.
+      - Utility functions must be pure where possible. Side effects should be isolated.
+      - Export types explicitly; no implicit re-exports (consistent with noImplicitReexport).
+      - No barrel re-export files that import * — use explicit named exports.
+    llm_config:
+      temperature: 0.2
+      max_tokens: 2000
+
+  # ── GitHub Actions / CI Workflows ────────────
+  - pattern: ".github/workflows/*.{yml,yaml}"
+    priority: 10
+    rules_text: |
+      CI Workflow Guidelines:
+      - All third-party actions must be pinned to a full commit SHA, not a floating tag.
+      - Never pass secrets to untrusted third-party actions.
+      - pull_request_target workflows have elevated permissions — review carefully.
+      - Do not loosen existing permission constraints.
+      - New workflow jobs that run tests must specify a timeout-minutes to prevent
+        runaway jobs from consuming CI quota.
+
+  # ── Python source (catch-all) ─────────────────
+  - pattern: "src/**/*.py"
+    priority: 5
+    rules_text: |
+      General Python Guidelines (Sentry):
+      - Python 3.13+. Use modern syntax: match/case, structural pattern matching,
+        walrus operator where appropriate.
+      - Line length: 100 characters maximum (ruff enforced).
+      - All functions must have complete type annotations (mypy strict mode).
+      - Abstract container types for inputs: Sequence, Mapping, Iterable (from collections.abc).
+      - Specific concrete types for returns: list, dict, set.
+      - No imports inside function bodies (except genuine circular import workarounds;
+        document with a comment if used).
+      - Use logger.exception() (not logger.error()) inside except blocks.
+      - Logging format: logger.info("message %s", value) — %-style, not f-string.
+      - Use sentry_sdk.capture_exception() / set_tag() for observability.
+      - Use options.get("option.name") without a second default argument.
+
+# ──────────────────────────────────────────────
+# Global LLM configuration
+# ──────────────────────────────────────────────
+llm:
+  provider: "anthropic"
+  model: "claude-sonnet-4-6"
+  temperature: 0.2
+  max_tokens: 3000
+
+# ──────────────────────────────────────────────
+# Global RAG configuration
+# ──────────────────────────────────────────────
+rag:
+  enabled: true
+  top_k: 5
+  documentation_paths:
+    - "AGENTS.md"
+    - "src/AGENTS.md"
+    - "tests/AGENTS.md"
+    - "static/AGENTS.md"
+    - "CONTRIBUTING.md"
+  architectural_docs:
+    - "AGENTS.md"
+    - "src/AGENTS.md"
+    - "static/AGENTS.md"
+
+# ──────────────────────────────────────────────
+# Impact Analysis (Breaking Changes Detection)
+# ──────────────────────────────────────────────
+impact_analysis:
+  enabled: true
+  max_callers_per_function: 10
+  depth: 1
+  analyze_imports: true
+  severity_threshold: "medium"
+  exclude_patterns:
+    - "tests/**"
+    - "fixtures/**"
+    - "**/*.spec.tsx"
+    - "**/*.spec.ts"
+    - "devenv/**"
+    - "devservices/**"
+    - ".github/**"

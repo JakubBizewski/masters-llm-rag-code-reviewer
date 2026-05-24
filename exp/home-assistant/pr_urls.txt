@@ -1,0 +1,4 @@
+https://github.com/home-assistant/core/pull/172045
+https://github.com/home-assistant/core/pull/172010
+https://github.com/home-assistant/core/pull/171862
+https://github.com/home-assistant/core/pull/170658
