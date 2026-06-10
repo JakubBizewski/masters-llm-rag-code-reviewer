@@ -13,13 +13,13 @@ Lista zadań do ukończenia, aby system był w 100% gotowy do produkcji.
   - ✅ Walidacja konfiguracji
   - ⚠️ Cache'owanie konfiguracji (optional dla MVP)
 
-- [ ] **GitLab Adapter** - `infrastructure/vcs/gitlab_adapter.py`
-  - Implementacja `VCSRepository` dla GitLab
-  - Obsługa Merge Requests (odpowiednik PR)
-  - Parsowanie diff'ów
-  - Publikowanie komentarzy
-  - Pobieranie zawartości plików
-  - Testy jednostkowe i integracyjne
+- [x] **GitLab Adapter** - `infrastructure/vcs/gitlab_adapter.py`
+  - ✅ Implementacja `VCSRepository` dla GitLab
+  - ✅ Obsługa Merge Requests (odpowiednik PR)
+  - ✅ Parsowanie diff'ów
+  - ✅ Publikowanie komentarzy
+  - ✅ Pobieranie zawartości plików
+  - ✅ Testy jednostkowe (5 tests)
 
 - [x] **Anthropic (Claude) Adapter** - `infrastructure/llm/anthropic_adapter.py`
   - ✅ Implementacja `LLMProvider` dla Claude
@@ -34,11 +34,11 @@ Lista zadań do ukończenia, aby system był w 100% gotowy do produkcji.
   - ✅ Parsowanie różnych formatów (Ruff, mypy, ESLint, etc.)
   - ✅ Testy
 
-- [ ] **GitLab CI Adapter** - `infrastructure/ci/gitlab_ci_adapter.py`
-  - Implementacja `StaticAnalyzer` dla GitLab CI
-  - Pobieranie artifacts i logów
-  - Parsowanie wyników CI/CD
-  - Testy
+- [x] **GitLab CI Adapter** - `infrastructure/ci/gitlab_ci_adapter.py`
+  - ✅ Implementacja `StaticAnalyzer` dla GitLab CI
+  - ✅ Pobieranie artifacts i logów (trace log per job, max 30k chars)
+  - ✅ Parsowanie wyników CI/CD (MR pipeline → jobs)
+  - ✅ Testy jednostkowe (5 tests)
 
 ### AST Parsing (Tree-sitter)
 
@@ -193,13 +193,28 @@ Lista zadań do ukończenia, aby system był w 100% gotowy do produkcji.
 
 ### Testing
 
+- [x] **Unit Tests** - `tests/unit/`
+  - ✅ `test_anthropic_adapter.py` (18 tests)
+  - ✅ `test_openai_adapter.py`
+  - ✅ `test_github_checks_adapter.py`
+  - ✅ `test_gitlab_adapter.py` (5 tests)
+  - ✅ `test_gitlab_ci_adapter.py` (5 tests)
+  - ✅ `test_github_jwt.py`
+  - ✅ `test_entities.py`
+  - ✅ `test_value_objects.py`
+  - ✅ `test_llm_impact_analyzer.py` (15 tests)
+  - ✅ `test_tree_sitter_call_graph_analyzer.py` (20 tests)
+  - ✅ `test_experimental_metrics.py` (4 tests)
+  - ✅ `test_faiss_store_history_indexing.py` (4 tests)
+  - ✅ `test_publish_config.py` (3 tests)
+
 - [x] **Integration Tests** - `tests/integration/`
   - ✅ Test pełnego flow review PR (test_full_pr_review_flow.py - 4 tests)
   - ✅ Test integracji z mock'owanymi external API (test_external_api_integration.py - 5 tests)
   - ✅ Test RAG retrieval flow (test_rag_retrieval_flow.py - 6 tests, 100% passing)
   - ✅ Test CI parsing flow (test_pr_review_with_ci.py - enhanced with 4 additional tests)
   - ✅ Test Impact Analysis integration (test_impact_analysis_integration.py - 7 tests, 100% passing)
-  - **Status**: 25 integration tests created, 13+ passing (some require dependency installation)
+  - **Status**: 25 integration tests, 13+ passing (some require optional dependency installation)
 
 - [ ] **E2E Tests** - `tests/e2e/`
   - Test z rzeczywistym GitHub repository
@@ -373,41 +388,41 @@ Lista zadań do ukończenia, aby system był w 100% gotowy do produkcji.
 
 Kryteria uznania systemu za gotowy do produkcji:
 
-- [ ] ✅ Test coverage ≥ 80%
-- [ ] ✅ Wszystkie kluczowe adaptery zaimplementowane
-- [ ] ✅ Security audit passed (webhook verification, rate limiting)
-- [ ] ✅ Documentation complete (API, deployment, user guide)
-- [ ] ✅ CI/CD pipeline w pełni functional
-- [ ] ✅ Load testing passed (100 concurrent reviews)
-- [ ] ✅ Error rate < 1% w production testing
-- [ ] ✅ P95 latency < 30s dla review completion
-- [ ] ✅ Successfully reviewed ≥100 real PRs bez major issues
+- [ ] Test coverage ≥ 80%
+- [x] Wszystkie kluczowe adaptery zaimplementowane (GitHub ✅, GitLab ✅, OpenAI ✅, Anthropic ✅, GitHub Checks ✅, GitLab CI ✅)
+- [ ] Security audit passed (webhook verification, rate limiting)
+- [ ] Documentation complete (API, deployment, user guide)
+- [ ] CI/CD pipeline w pełni functional
+- [ ] Load testing passed (100 concurrent reviews)
+- [ ] Error rate < 1% w production testing
+- [ ] P95 latency < 30s dla review completion
+- [ ] Successfully reviewed ≥100 real PRs bez major issues
 
 ## 🚀 Roadmap
 
-### Faza 1: MVP (Minimum Viable Product) - 2 tygodnie
-- Implementacja YAMLConfigLoader
-- Dokończenie testów jednostkowych
-- Basic webhook security
-- Deployment documentation
+### Faza 1: MVP ✅ DONE
+- ~~Implementacja YAMLConfigLoader~~ ✅
+- ~~Dokończenie testów jednostkowych~~ ✅
+- Basic webhook security — ❌ remaining
+- Deployment documentation — ❌ remaining
 
-### Faza 2: Production Ready - 4 tygodnie
-- GitLab adapter
-- Anthropic adapter
-- CI adapters (GitHub Checks, GitLab CI)
-- Integration tests
-- GitHub Actions CI/CD
-- Monitoring i metrics
+### Faza 2: Production Ready — MOSTLY DONE
+- ~~GitLab adapter~~ ✅
+- ~~Anthropic adapter~~ ✅
+- ~~CI adapters (GitHub Checks, GitLab CI)~~ ✅
+- ~~Integration tests~~ ✅
+- GitHub Actions CI/CD — ❌ remaining
+- Monitoring i metrics — ❌ remaining
 
-### Faza 3: Advanced Features - 6 tygodni
-- ~~AST parsing z tree-sitter~~ ✅ (DONE)
-- ~~**Impact Analysis (Call Tree / Import Tree)**~~ ✅ (DONE - 42/42 tests passing)
-- Advanced RAG (hybrid search, re-ranking)
-- Multi-file context
-- Learning from feedback
-- Performance optimizations
+### Faza 3: Advanced Features ✅ DONE
+- ~~AST parsing z tree-sitter~~ ✅
+- ~~Impact Analysis (Call Tree / Import Tree)~~ ✅ (42/42 tests passing)
+- Advanced RAG (hybrid search, re-ranking) — Nice to have
+- Multi-file context — Nice to have
+- Learning from feedback — Nice to have
+- Performance optimizations — Nice to have
 
-### Faza 4: Scale & Polish - 4 tygodnie
+### Faza 4: Scale & Polish — OUT OF SCOPE (thesis complete)
 - Queue system
 - Database support
 - Admin dashboard
@@ -417,12 +432,12 @@ Kryteria uznania systemu za gotowy do produkcji:
 ## 📝 Notatki
 
 ### Priorytety na teraz:
-1. **YAMLConfigLoader** - ✅ Done (caching optional dla MVP)
+1. **YAMLConfigLoader** - ✅ Done
 2. **AST Parsing** - ✅ Done (tree-sitter + 4 languages)
 3. **Impact Analysis** - ✅ Done (42/42 tests passing = 100%)
-4. **Webhook security** - przed uruchomieniem w produkcji
-5. **Tests** - ✅ Done (Impact Analysis: 42/42 tests passing = 100%)
-6. **CI/CD** - automatyzacja testowania i deployment
+4. **All core adapters** - ✅ Done (GitHub, GitLab, OpenAI, Anthropic, GitHub Checks, GitLab CI)
+5. **Webhook security** - ❌ Not implemented; required before any public deployment
+6. **CI/CD** - ❌ No GitHub Actions yet (.github/ missing)
 
 ### Decyzje do podjęcia:
 - [ ] Czy używamy bazy danych czy tylko in-memory store?
@@ -440,6 +455,6 @@ Kryteria uznania systemu za gotowy do produkcji:
 
 ---
 
-**Ostatnia aktualizacja**: 2026-02-26
-**Status**: 🟡 MVP w trakcie implementacji, AST Parsing ✅, Impact Analysis ✅ Done (100%)
-**Następny milestone**: Faza 1 completion (GitLab adapter, webhook security)
+**Ostatnia aktualizacja**: 2026-06-10
+**Status**: 🟢 Wszystkie kluczowe adaptery zaimplementowane; brakuje webhook security i CI/CD pipeline
+**Następny milestone**: Webhook signature verification + GitHub Actions CI workflow
