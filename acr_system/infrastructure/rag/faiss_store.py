@@ -60,7 +60,11 @@ class FAISSStore(EmbeddingStore):
         self.stats: dict[str, int] = {
             "embedding_tokens": 0,
             "embedding_texts": 0,
+            "retrieved_chunks": 0,
         }
+        # Log of every search_similar call made during the review phase.
+        # Each entry: {query, filters, returned: [{source, relevance_score, content_excerpt}]}
+        self.retrieval_log: list[dict] = []
 
         # Best-effort load persisted index
         self._load_if_exists()
@@ -151,7 +155,9 @@ class FAISSStore(EmbeddingStore):
         self.stats = {
             "embedding_tokens": 0,
             "embedding_texts": 0,
+            "retrieved_chunks": 0,
         }
+        self.retrieval_log = []
 
     def _embed_text(self, text: str) -> np.ndarray:  # type: ignore
         """Generate embedding for text (also counts approximate tokens)."""
@@ -265,7 +271,20 @@ class FAISSStore(EmbeddingStore):
 
                     if len(contexts) >= requested_k:
                         break
-            
+
+            self.stats["retrieved_chunks"] += len(contexts)
+            self.retrieval_log.append({
+                "query": query[:600],
+                "filters": filters,
+                "returned": [
+                    {
+                        "source": c.source,
+                        "relevance_score": round(c.relevance_score, 4),
+                        "content_excerpt": c.content[:400],
+                    }
+                    for c in contexts
+                ],
+            })
             return contexts
             
         except Exception as e:

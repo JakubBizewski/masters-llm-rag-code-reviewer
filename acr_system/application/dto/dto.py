@@ -9,10 +9,15 @@ from acr_system.domain.value_objects.value_objects import LLMConfig, RAGConfig
 @dataclass
 class PRReviewRequest:
     """Request to review a pull request."""
-    
+
     repository: str  # "owner/repo"
     pr_number: int
     config_override: Optional[dict] = None  # Optional config override
+    # When set, review uses these exact refs instead of the current PR head.
+    # head_sha — the commit to review (e.g. initial PR commit, not post-fixup)
+    # base_sha — the merge-base to diff against
+    head_sha: Optional[str] = None
+    base_sha: Optional[str] = None
     
 
 @dataclass

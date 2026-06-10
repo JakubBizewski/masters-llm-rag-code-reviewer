@@ -63,7 +63,8 @@ class GitHubAdapter(VCSRepository):
                 author=data["user"]["login"],
                 source_branch=data["head"]["ref"],
                 target_branch=data["base"]["ref"],
-                head_sha=data["head"]["sha"],  # Store HEAD commit SHA
+                head_sha=data["head"]["sha"],
+                base_sha=data["base"]["sha"],
                 created_at=created_at or datetime.now(timezone.utc),
             )
             
@@ -72,29 +73,44 @@ class GitHubAdapter(VCSRepository):
         except httpx.HTTPError as e:
             raise VCSAPIError(f"Error fetching PR from GitHub: {e}") from e
     
-    async def get_diff_hunks(self, repo: str, pr_number: int) -> list[DiffHunk]:
-        """Fetch diff hunks for a PR."""
+    async def get_diff_hunks(
+        self,
+        repo: str,
+        pr_number: int,
+        head_sha: Optional[str] = None,
+        base_sha: Optional[str] = None,
+    ) -> list[DiffHunk]:
+        """Fetch diff hunks for a PR.
+
+        When head_sha and base_sha are both provided, uses the compare API
+        (base_sha...head_sha) so the diff reflects the exact commits requested
+        rather than the PR's current state.
+        """
         try:
             headers = await self._get_headers(repo)
-            
-            url = f"{self.API_BASE}/repos/{repo}/pulls/{pr_number}/files"
-            response = await self.client.get(url, headers=headers)
-            response.raise_for_status()
-            
-            files = response.json()
+
+            if head_sha and base_sha:
+                url = f"{self.API_BASE}/repos/{repo}/compare/{base_sha}...{head_sha}"
+                response = await self.client.get(url, headers=headers)
+                response.raise_for_status()
+                files = response.json().get("files", [])
+            else:
+                url = f"{self.API_BASE}/repos/{repo}/pulls/{pr_number}/files"
+                response = await self.client.get(url, headers=headers)
+                response.raise_for_status()
+                files = response.json()
+
             hunks = []
-            
             for file in files:
                 if file.get("patch"):
-                    # Parse patch into hunks
                     file_hunks = self._parse_patch(
                         file_path=file["filename"],
                         patch=file["patch"],
                     )
                     hunks.extend(file_hunks)
-            
+
             return hunks
-            
+
         except httpx.HTTPError as e:
             raise VCSAPIError(f"Error fetching diff from GitHub: {e}") from e
     
@@ -392,6 +408,44 @@ class GitHubAdapter(VCSRepository):
 
         except httpx.HTTPError as e:
             raise VCSAPIError(f"Error fetching PR discussion from GitHub: {e}") from e
+
+
+    async def get_pr_commits(self, repo: str, pr_number: int) -> list[dict]:
+        """Return PR commits in chronological order: [{sha, committed_at}]."""
+        try:
+            headers = await self._get_headers(repo)
+            commits: list[dict] = []
+            page = 1
+            while True:
+                url = f"{self.API_BASE}/repos/{repo}/pulls/{pr_number}/commits"
+                resp = await self.client.get(url, headers=headers, params={"per_page": 100, "page": page})
+                resp.raise_for_status()
+                batch = resp.json()
+                if not batch:
+                    break
+                for c in batch:
+                    committed_at = _parse_github_datetime(
+                        (c.get("commit") or {}).get("committer", {}).get("date")
+                        or (c.get("commit") or {}).get("author", {}).get("date")
+                    )
+                    commits.append({"sha": c["sha"], "committed_at": committed_at})
+                if len(batch) < 100:
+                    break
+                page += 1
+            return commits
+        except httpx.HTTPError as e:
+            raise VCSAPIError(f"Error fetching PR commits from GitHub: {e}") from e
+
+    async def get_merge_base_sha(self, repo: str, base_ref: str, head_sha: str) -> Optional[str]:
+        """Return merge-base SHA via GitHub compare API (git merge-base equivalent)."""
+        try:
+            headers = await self._get_headers(repo)
+            url = f"{self.API_BASE}/repos/{repo}/compare/{base_ref}...{head_sha}"
+            resp = await self.client.get(url, headers=headers)
+            resp.raise_for_status()
+            return resp.json().get("merge_base_commit", {}).get("sha")
+        except httpx.HTTPError:
+            return None
 
 
 def _parse_github_datetime(value: Optional[str]) -> Optional[datetime]:

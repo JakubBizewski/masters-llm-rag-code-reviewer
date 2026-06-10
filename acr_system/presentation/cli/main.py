@@ -1,6 +1,7 @@
 """CLI for ACR System."""
 import asyncio
 import os
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -422,6 +423,99 @@ def _create_adapters(provider: str) -> tuple[GitHubAdapter | GitLabAdapter, GitH
     raise ValueError(f"Unsupported provider: {provider}")
 
 
+def _save_codebase_snapshot(result, report_path: str) -> Optional[Path]:
+    """Write head/ (changed files only) to disk and clone base/ (full repo).
+
+    Directory layout (shared between rag and no_rag runs of the same PR):
+        <report_dir>/pr<N>/head/<file_path>   – changed files at initial PR commit
+        <report_dir>/pr<N>/base/              – full repo clone at merge-base SHA
+
+    Returns the codebase root directory, or None if snapshot is empty.
+    """
+    if not result.codebase_snapshot and not result.base_sha:
+        return None
+
+    report_dir = Path(report_path).parent
+    codebase_dir = report_dir / f"pr{result.pr_number}"
+
+    # head/ — only files changed in the PR, at the commit when PR was opened
+    for entry in result.codebase_snapshot:
+        file_path: str = entry.get("file_path", "")
+        content = entry.get("head_content")
+        if file_path and content is not None:
+            dest = codebase_dir / "head" / file_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content, encoding="utf-8")
+
+    # base/ — full repo clone at the merge-base SHA
+    if result.base_sha:
+        _clone_base_codebase(
+            repo=result.repository,
+            base_sha=result.base_sha,
+            dest=codebase_dir / "base",
+            fallback_entries=result.codebase_snapshot,
+        )
+
+    return codebase_dir
+
+
+def _clone_base_codebase(
+    repo: str,
+    base_sha: str,
+    dest: Path,
+    fallback_entries: list,
+) -> None:
+    """Shallow-clone the full repo at base_sha into dest.
+
+    Uses --filter=blob:none so only the tree objects needed for the checkout
+    are downloaded (no full history blobs). Falls back to writing individual
+    base files from the snapshot if git or GITHUB_TOKEN is unavailable.
+    """
+    import shutil
+    import subprocess
+
+    token = os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
+
+    if token and dest.exists():
+        # Idempotent: already cloned by a previous run
+        if (dest / ".git").exists():
+            click.echo(f"  base/ already present, skipping clone")
+            return
+
+    if token:
+        clone_url = f"https://x-access-token:{token}@github.com/{repo}.git"
+        dest.mkdir(parents=True, exist_ok=True)
+        try:
+            for cmd in [
+                ["git", "init"],
+                ["git", "remote", "add", "origin", clone_url],
+                # Fetch the specific commit without full history
+                ["git", "fetch", "--filter=blob:none", "--depth=1", "origin", base_sha],
+                ["git", "checkout", "FETCH_HEAD"],
+            ]:
+                r = subprocess.run(
+                    cmd, cwd=dest, capture_output=True, text=True, timeout=300
+                )
+                if r.returncode != 0:
+                    raise RuntimeError(r.stderr.strip() or r.stdout.strip())
+            click.echo(f"  ✓ base/ cloned ({base_sha[:8]})")
+            return
+        except Exception as exc:
+            click.echo(f"  ⚠ git clone failed: {exc} — falling back to changed files only", err=True)
+            shutil.rmtree(dest, ignore_errors=True)
+    else:
+        click.echo("  ⚠ GITHUB_TOKEN not set — base/ will contain changed files only", err=True)
+
+    # Fallback: write only the changed base files from the snapshot
+    for entry in fallback_entries:
+        file_path: str = entry.get("file_path", "")
+        content = entry.get("base_content")
+        if file_path and content is not None:
+            out = dest / file_path
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(content, encoding="utf-8")
+
+
 async def _evaluate_async(
     pr_url: str,
     config_path: str,
@@ -495,8 +589,14 @@ async def _evaluate_async(
             )
         )
 
+        codebase_dir = _save_codebase_snapshot(result, report_path)
+        result.codebase_snapshot = []   # free memory; files are on disk
+        result.codebase_dir = str(codebase_dir) if codebase_dir else None
+
         write_json_report(report_path, result)
         click.echo(f"✓ Report written to: {report_path}")
+        if codebase_dir:
+            click.echo(f"✓ Codebase snapshot: {codebase_dir}")
 
         await vcs_adapter.close()
 

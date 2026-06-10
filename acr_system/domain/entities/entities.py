@@ -171,7 +171,8 @@ class PullRequest:
     author: str
     source_branch: str
     target_branch: str
-    head_sha: Optional[str] = None  # HEAD commit SHA for posting comments
+    head_sha: Optional[str] = None  # tip of the PR branch at the time of review
+    base_sha: Optional[str] = None  # target branch commit the PR was based on
     id: UUID = field(default_factory=uuid4)
     diff_hunks: List[DiffHunk] = field(default_factory=list)
     ci_results: List[CIToolResult] = field(default_factory=list)

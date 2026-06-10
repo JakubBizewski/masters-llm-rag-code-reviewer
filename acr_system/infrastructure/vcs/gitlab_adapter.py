@@ -93,7 +93,7 @@ class GitLabAdapter(VCSRepository):
         except httpx.HTTPError as e:
             raise VCSAPIError(f"Error fetching MR from GitLab: {e}") from e
 
-    async def get_diff_hunks(self, repo: str, pr_number: int) -> list[DiffHunk]:
+    async def get_diff_hunks(self, repo: str, pr_number: int, head_sha: Optional[str] = None, base_sha: Optional[str] = None) -> list[DiffHunk]:
         """Fetch diff hunks for a Merge Request."""
         try:
             project = self._project(repo)
@@ -313,6 +313,12 @@ class GitLabAdapter(VCSRepository):
 
         except httpx.HTTPError as e:
             raise VCSAPIError(f"Error fetching MR discussions from GitLab: {e}") from e
+
+    async def get_pr_commits(self, repo: str, pr_number: int) -> list[dict]:
+        return []
+
+    async def get_merge_base_sha(self, repo: str, base_ref: str, head_sha: str) -> Optional[str]:
+        return None
 
     async def close(self) -> None:
         await self.client.aclose()

@@ -51,10 +51,17 @@ class ProcessPullRequestUseCase:
                 repo=request.repository,
                 pr_number=request.pr_number,
             )
-            
+
+            # When explicit refs are supplied (evaluation mode), pin head_sha so
+            # that surrounding-context fetches use the same commit as the diff.
+            if request.head_sha:
+                pr.head_sha = request.head_sha
+
             diff_hunks = await self.vcs_repository.get_diff_hunks(
                 repo=request.repository,
                 pr_number=request.pr_number,
+                head_sha=request.head_sha,
+                base_sha=request.base_sha,
             )
             
             for hunk in diff_hunks:

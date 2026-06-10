@@ -1,6 +1,6 @@
 """Domain interfaces (Ports) for infrastructure adapters."""
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from acr_system.domain.entities.entities import (
     ArchitecturalDocument,
@@ -32,8 +32,20 @@ class VCSRepository(ABC):
         pass
     
     @abstractmethod
-    async def get_diff_hunks(self, repo: str, pr_number: int) -> List[DiffHunk]:
-        """Fetch diff hunks for a PR."""
+    async def get_diff_hunks(
+        self,
+        repo: str,
+        pr_number: int,
+        head_sha: Optional[str] = None,
+        base_sha: Optional[str] = None,
+    ) -> List[DiffHunk]:
+        """Fetch diff hunks for a PR.
+
+        If head_sha and base_sha are provided, the diff is computed between
+        those two exact commits (base_sha...head_sha) instead of using the
+        PR's current head. Use this to review the code as it was when the
+        PR was first opened, before any fixup commits.
+        """
         pass
     
     @abstractmethod
@@ -87,6 +99,32 @@ class VCSRepository(ABC):
         """Fetch PR discussion comments (review comments + issue comments).
 
         Returned comments should include replies (threading info) when available.
+        """
+        pass
+
+    @abstractmethod
+    async def get_pr_commits(
+        self,
+        repo: str,
+        pr_number: int,
+    ) -> List[Dict[str, Any]]:
+        """Return commits belonging to the PR in chronological order.
+
+        Each entry: {"sha": str, "committed_at": datetime}
+        """
+        pass
+
+    @abstractmethod
+    async def get_merge_base_sha(
+        self,
+        repo: str,
+        base_ref: str,
+        head_sha: str,
+    ) -> Optional[str]:
+        """Return the merge-base commit SHA between base_ref and head_sha.
+
+        Equivalent to: git merge-base base_ref head_sha
+        Returns None if the VCS backend does not support this operation.
         """
         pass
 
