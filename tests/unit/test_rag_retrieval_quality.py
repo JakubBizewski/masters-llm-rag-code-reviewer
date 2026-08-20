@@ -149,8 +149,11 @@ async def test_documentation_is_retrieved_with_its_own_query():
 
     await builder.build_context(_hunk(), _pr(), cfg)
 
-    filters = [c.kwargs.get("filters") for c in store.search_similar.await_args_list]
-    assert {"source": "documentation"} in filters
+    sources = [
+        (c.kwargs.get("filters") or {}).get("source")
+        for c in store.search_similar.await_args_list
+    ]
+    assert "documentation" in sources
 
 
 @pytest.mark.asyncio
@@ -229,3 +232,28 @@ def test_default_top_k_is_small():
     """Retrieving many loosely-related chunks degrades generation (Meng2025RARe)."""
     assert RAGConfig().top_k <= 3
     assert RAGConfig().min_relevance > 0.0
+
+
+# ── evaluation validity: never retrieve the PR under review ───────────────────
+
+@pytest.mark.asyncio
+async def test_every_retrieval_excludes_the_target_pr():
+    """The PR under review must be excluded from every retrieval call.
+
+    Its own review threads are the closest match to its own diff, so an unfiltered
+    call hands the model the exact comments the review is meant to produce. This
+    was observed live: 24 of 45 injected chunks on home-assistant/169749 came from
+    that PR's own threads at cosine up to 0.949.
+    """
+    builder, store = _builder([[], [], []])
+    cfg = RAGConfig(enabled=True, top_k=3, min_relevance=0.5)
+    pr = _pr()
+
+    await builder.build_context(_hunk(), pr, cfg)
+
+    assert store.search_similar.await_count == 3
+    for call in store.search_similar.await_args_list:
+        filters = call.kwargs.get("filters") or {}
+        assert filters.get("exclude_pr_number") == str(pr.pr_number), (
+            f"retrieval call without target-PR exclusion: {filters}"
+        )

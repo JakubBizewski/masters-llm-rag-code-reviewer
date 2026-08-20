@@ -62,9 +62,14 @@ class ContextBuilder:
         # RAG retrieval if enabled
         if rag_config and rag_config.enabled:
             query = self._build_rag_query(diff_hunk)
+            # The target PR must be excluded here too, not only from the history
+            # search below. Its own review threads are trivially the closest match
+            # to its own diff, so without this filter the model is handed the very
+            # comments the review is supposed to produce.
             rag_results = await self.embedding_store.search_similar(
                 query=query,
                 top_k=rag_config.top_k,
+                filters={"exclude_pr_number": str(pr.pr_number)},
                 min_relevance=rag_config.min_relevance,
                 max_per_source=rag_config.max_chunks_per_source,
             )
@@ -90,7 +95,10 @@ class ContextBuilder:
             doc_results = await self.embedding_store.search_similar(
                 query=query,
                 top_k=min(2, rag_config.top_k),
-                filters={"source": "documentation"},
+                filters={
+                    "source": "documentation",
+                    "exclude_pr_number": str(pr.pr_number),
+                },
                 min_relevance=rag_config.min_relevance,
             )
 

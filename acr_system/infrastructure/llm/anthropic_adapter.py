@@ -132,6 +132,17 @@ class AnthropicAdapter(LLMProvider):
             completion_tokens=approx_token_count(completion_text),
         )
     
+    # Per-kind prompt budgets for the Additional Context section.
+    MAX_SURROUNDING_SECTIONS = 1
+    MAX_DOC_SECTIONS = 2
+    MAX_RETRIEVED_SECTIONS = 3
+    # The current file is what lets the model verify its own claims, so it gets the
+    # largest share; 500 characters was about ten lines and could not support the
+    # "confirm the absence in surrounding_code" rule the instructions rely on.
+    SURROUNDING_CHAR_BUDGET = 6000
+    DOC_CHAR_BUDGET = 1500
+    RETRIEVED_CHAR_BUDGET = 700
+
     def _build_review_prompt(
         self,
         diff_hunk: DiffHunk,
@@ -168,11 +179,45 @@ Use only line numbers from this map when filling `line`.
 
 """
         
-        # Add context if available
+        # Add context if available.
+        #
+        # Sections are budgeted per kind rather than by a single "first 3 items" cap.
+        # With the old flat cap, three retrieved chunks evicted the surrounding_code
+        # section entirely — so a RAG review could not see the file it was reviewing,
+        # while a no-RAG review always could. That produced exactly the failure mode
+        # observed in evaluation: confident claims that a symbol is missing when it is
+        # present a few lines above the hunk.
         if context:
+            surrounding = [c for c in context if c.source == "surrounding_code"]
+            docs = [c for c in context if c.source == "documentation"]
+            retrieved = [
+                c for c in context
+                if c.source not in ("surrounding_code", "documentation")
+            ]
+
             prompt += "## Additional Context\n"
-            for ctx in context[:3]:  # Limit to top 3 contexts
-                prompt += f"### From {ctx.source}\n```\n{ctx.content[:500]}\n```\n\n"
+
+            # Highest-priority evidence per the Instructions section below, and the
+            # only source that can confirm or refute "symbol X is missing" claims.
+            for ctx in surrounding[: self.MAX_SURROUNDING_SECTIONS]:
+                prompt += (
+                    "### From surrounding_code (current file — authoritative)\n"
+                    f"```\n{ctx.content[: self.SURROUNDING_CHAR_BUDGET]}\n```\n\n"
+                )
+
+            # Project documentation states binding conventions; truncating it at 500
+            # characters cut most conventions off mid-sentence.
+            for ctx in docs[: self.MAX_DOC_SECTIONS]:
+                prompt += (
+                    "### Project convention (from project documentation — binding)\n"
+                    f"```\n{ctx.content[: self.DOC_CHAR_BUDGET]}\n```\n\n"
+                )
+
+            for ctx in retrieved[: self.MAX_RETRIEVED_SECTIONS]:
+                prompt += (
+                    f"### From {ctx.source} (prior review history — indicative)\n"
+                    f"```\n{ctx.content[: self.RETRIEVED_CHAR_BUDGET]}\n```\n\n"
+                )
         
         # Add CI issues if available
         if ci_issues:
@@ -198,9 +243,10 @@ Review the code changes and provide feedback in the following JSON format:
 Only include comments for actual issues. If the code looks good, return an empty comments array.
 Comments must be evidence-based and verifiable from the diff/context/CI data.
 Do NOT include speculation, uncertainty, or style-only suggestions (forbidden phrases include: may, might, could, appears, seems, consider, requires verification, potential).
-Evidence hierarchy (most reliable to least): surrounding_code, Unified Diff, CI issues, PR history context.
+Evidence hierarchy (most reliable to least): surrounding_code, Unified Diff, CI issues, project documentation, PR history context.
 When sources conflict, follow the higher-priority source and do not report issues contradicted by it.
-Only report missing import/symbol issues when the absence is confirmed in surrounding_code.
+Only report missing import/symbol issues when the absence is confirmed in surrounding_code. If surrounding_code is not provided, do not claim that any symbol, import or fixture is missing.
+If a "Project convention" section is present, check the changed lines against each convention it states and report any violation as a comment, quoting the convention. A convention violation is a reportable issue even when the code is otherwise correct. Do not invent conventions that are not stated in the provided sections.
 Focus on: correctness, security, performance, maintainability, and adherence to the rules above.
 If exact line is ambiguous, choose the nearest changed line within the valid hunk range.
 Anchor by issue type:
