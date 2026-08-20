@@ -2,9 +2,14 @@
 """Aggregate ACR evaluation JSON reports into a comparison table.
 
 Usage:
-    python exp/aggregate_reports.py [DIR]
+    python exp/aggregate_reports.py [DIR] [--created-at=YYYY-MM-DD]
 
 DIR defaults to the directory containing this script.
+
+--created-at=YYYY-MM-DD restricts the aggregation to report files written on or
+after that date (file modification time, i.e. when the evaluation run produced
+the report — not the PR creation date). Use it to aggregate a single experiment
+batch, e.g. --created-at=2026-08-01 for runs made in August 2026.
 
 Report files are expected in subdirectories named after the repository:
     <DIR>/<repo>/pr<NUMBER>_rag.json
@@ -21,9 +26,14 @@ The script outputs:
   - aggregate_results.json — structured report with per-PR comparisons,
     aggregated statistics (by mode and by repository), and expert evaluation
     placeholders ready to be filled in manually.
+
+With --created-at=YYYY-MM-DD the output files are suffixed with that date
+(aggregate_results_YYYY-MM-DD.csv / aggregate_results_YYYY-MM-DD.json), so
+per-batch aggregates never overwrite the unsuffixed full-run files.
 """
 from __future__ import annotations
 
+import argparse
 import csv
 import datetime
 import json
@@ -87,27 +97,59 @@ def _fmt(v) -> str:
     return str(v)
 
 
-def find_pairs(report_dir: Path) -> list[tuple[Path | None, Path | None, str]]:
-    """Return [(rag_path, no_rag_path, label)] grouped by repo/pr.
+def parse_created_at(value: str) -> datetime.date:
+    """Parse a --created-at value (YYYY-MM-DD) into a date."""
+    try:
+        return datetime.date.fromisoformat(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"invalid date {value!r} — expected YYYY-MM-DD, e.g. 2026-08-01"
+        ) from None
+
+
+def find_pairs(
+    report_dir: Path,
+    created_at: datetime.date | None = None,
+) -> tuple[list[tuple[Path | None, Path | None, str]], int]:
+    """Return ([(rag_path, no_rag_path, label)], skipped_count) grouped by repo/pr.
 
     Scans one level of subdirectories: <report_dir>/<repo>/pr<N>_[no_]rag.json.
     Label is '<repo>/pr<N>', e.g. 'sentry/pr123'.
+
+    If created_at is given, only report files whose modification time falls on or
+    after that date (local time) are considered; skipped_count reports how many
+    report files were filtered out.
     """
     rag_files: dict[str, Path] = {}
     no_rag_files: dict[str, Path] = {}
+    skipped = 0
+
+    min_mtime = None
+    if created_at is not None:
+        min_mtime = datetime.datetime.combine(
+            created_at, datetime.time.min
+        ).timestamp()
 
     for f in sorted(report_dir.glob("*/*.json")):
         repo = f.parent.name
         name = f.stem
         if name.endswith("_no_rag"):
             key = f"{repo}/{name[: -len('_no_rag')]}"
-            no_rag_files[key] = f
+            bucket = no_rag_files
         elif name.endswith("_rag"):
             key = f"{repo}/{name[: -len('_rag')]}"
-            rag_files[key] = f
+            bucket = rag_files
+        else:
+            continue
+
+        if min_mtime is not None and f.stat().st_mtime < min_mtime:
+            skipped += 1
+            continue
+
+        bucket[key] = f
 
     all_keys = sorted(set(rag_files) | set(no_rag_files))
-    return [(rag_files.get(k), no_rag_files.get(k), k) for k in all_keys]
+    return [(rag_files.get(k), no_rag_files.get(k), k) for k in all_keys], skipped
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +248,7 @@ _EXPERT_EVAL_TEMPLATE: dict = {
 def build_json_report(
     row_pairs: list[tuple[dict | None, dict | None, str]],
     all_rows: list[dict],
+    created_at: datetime.date | None = None,
 ) -> dict:
     """Build the full structured JSON report."""
     per_pr = []
@@ -247,6 +290,7 @@ def build_json_report(
 
     return {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "created_at_filter": created_at.isoformat() if created_at else None,
         "repositories": repos,
         "total_prs": len(per_pr),
         "per_pr": per_pr,
@@ -258,20 +302,54 @@ def build_json_report(
 # Entry point
 # ---------------------------------------------------------------------------
 
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Aggregate ACR evaluation JSON reports into a comparison table. "
+            "Use --created-at to aggregate a single experiment batch into "
+            "date-suffixed output files."
+        )
+    )
+    parser.add_argument(
+        "report_dir",
+        nargs="?",
+        default=Path(__file__).parent,
+        type=Path,
+        help="directory containing <repo>/pr<N>_[no_]rag.json (default: this script's directory)",
+    )
+    parser.add_argument(
+        "--created-at",
+        metavar="YYYY-MM-DD",
+        type=parse_created_at,
+        default=None,
+        help=(
+            "only aggregate reports written on or after this date (file "
+            "modification time); output files get the date as a suffix"
+        ),
+    )
+    return parser.parse_args(argv)
+
+
 def main() -> None:
-    if len(sys.argv) >= 2:
-        report_dir = Path(sys.argv[1])
-    else:
-        report_dir = Path(__file__).parent
+    args = parse_args()
+    report_dir = args.report_dir
+    created_at = args.created_at
 
     if not report_dir.is_dir():
         print(f"Error: {report_dir} is not a directory", file=sys.stderr)
         sys.exit(1)
 
-    pairs = find_pairs(report_dir)
+    pairs, skipped = find_pairs(report_dir, created_at)
+
+    if created_at:
+        print(f"Filter: reports created on or after {created_at.isoformat()}")
+        print(f"        {skipped} older report file(s) skipped")
+
     if not pairs:
         print(f"No report pairs found in {report_dir}.")
         print("Expected: <repo>/pr<N>_rag.json and <repo>/pr<N>_no_rag.json")
+        if created_at:
+            print(f"None of them were created on or after {created_at.isoformat()}.")
         sys.exit(1)
 
     all_rows: list[dict] = []
@@ -292,16 +370,18 @@ def main() -> None:
     if not all_rows:
         return
 
+    suffix = f"_{created_at.isoformat()}" if created_at else ""
+
     # CSV — flat table
-    csv_path = report_dir / "aggregate_results.csv"
+    csv_path = report_dir / f"aggregate_results{suffix}.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(all_rows[0].keys()))
         writer.writeheader()
         writer.writerows(all_rows)
 
     # JSON — full structured report
-    json_report = build_json_report(row_pairs, all_rows)
-    json_path = report_dir / "aggregate_results.json"
+    json_report = build_json_report(row_pairs, all_rows, created_at)
+    json_path = report_dir / f"aggregate_results{suffix}.json"
     with json_path.open("w", encoding="utf-8") as f:
         json.dump(json_report, f, indent=2, ensure_ascii=False)
 
