@@ -90,7 +90,10 @@ file_patterns:
       max_tokens: 3000
     rag_config:
       enabled: true
-      top_k: 5
+      top_k: 3
+      min_relevance: 0.5
+      max_chunks_per_source: 2
+      lexical_weight: 0.3
       documentation_paths:
         - "homeassistant/components/acaia/"
         - "homeassistant/components/shelly/"
@@ -308,12 +311,18 @@ llm:
 # ──────────────────────────────────────────────
 rag:
   enabled: true
-  top_k: 5
+  top_k: 3
+  min_relevance: 0.5
+  max_chunks_per_source: 2
+  lexical_weight: 0.3
   documentation_paths:
     - "README.rst"
     - "CONTRIBUTING.md"
     - ".github/instructions/"
     - ".claude/skills/ha-integration-knowledge/"
+    - "AGENTS.md"
+    - "CLAUDE.md"
+    - "**/AGENTS.md"
   architectural_docs:
     - ".github/copilot-instructions.md"
     - ".github/instructions/integrations.instructions.md"

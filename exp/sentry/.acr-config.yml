@@ -100,7 +100,10 @@ file_patterns:
       max_tokens: 3000
     rag_config:
       enabled: true
-      top_k: 5
+      top_k: 3
+      min_relevance: 0.5
+      max_chunks_per_source: 2
+      lexical_weight: 0.3
       documentation_paths:
         - "src/AGENTS.md"
         - "AGENTS.md"
@@ -128,7 +131,10 @@ file_patterns:
       max_tokens: 2500
     rag_config:
       enabled: true
-      top_k: 5
+      top_k: 3
+      min_relevance: 0.5
+      max_chunks_per_source: 2
+      lexical_weight: 0.3
       documentation_paths:
         - "src/AGENTS.md"
 
@@ -156,6 +162,9 @@ file_patterns:
     rag_config:
       enabled: true
       top_k: 3
+      min_relevance: 0.5
+      max_chunks_per_source: 2
+      lexical_weight: 0.3
       documentation_paths:
         - "src/AGENTS.md"
 
@@ -226,6 +235,9 @@ file_patterns:
     rag_config:
       enabled: true
       top_k: 3
+      min_relevance: 0.5
+      max_chunks_per_source: 2
+      lexical_weight: 0.3
       documentation_paths:
         - "tests/AGENTS.md"
         - "src/AGENTS.md"
@@ -271,7 +283,10 @@ file_patterns:
       max_tokens: 3000
     rag_config:
       enabled: true
-      top_k: 5
+      top_k: 3
+      min_relevance: 0.5
+      max_chunks_per_source: 2
+      lexical_weight: 0.3
       documentation_paths:
         - "static/AGENTS.md"
         - "AGENTS.md"
@@ -301,7 +316,10 @@ file_patterns:
       max_tokens: 3000
     rag_config:
       enabled: true
-      top_k: 5
+      top_k: 3
+      min_relevance: 0.5
+      max_chunks_per_source: 2
+      lexical_weight: 0.3
       documentation_paths:
         - "static/AGENTS.md"
 
@@ -331,6 +349,9 @@ file_patterns:
     rag_config:
       enabled: true
       top_k: 3
+      min_relevance: 0.5
+      max_chunks_per_source: 2
+      lexical_weight: 0.3
       documentation_paths:
         - "static/AGENTS.md"
         - "tests/AGENTS.md"
@@ -394,13 +415,18 @@ llm:
 # ──────────────────────────────────────────────
 rag:
   enabled: true
-  top_k: 5
+  top_k: 3
+  min_relevance: 0.5
+  max_chunks_per_source: 2
+  lexical_weight: 0.3
   documentation_paths:
     - "AGENTS.md"
     - "src/AGENTS.md"
     - "tests/AGENTS.md"
     - "static/AGENTS.md"
     - "CONTRIBUTING.md"
+    - "CLAUDE.md"
+    - "**/AGENTS.md"
   architectural_docs:
     - "AGENTS.md"
     - "src/AGENTS.md"

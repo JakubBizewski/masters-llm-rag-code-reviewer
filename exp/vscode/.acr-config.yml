@@ -112,7 +112,10 @@ file_patterns:
       max_tokens: 3000
     rag_config:
       enabled: true
-      top_k: 5
+      top_k: 3
+      min_relevance: 0.5
+      max_chunks_per_source: 2
+      lexical_weight: 0.3
       documentation_paths:
         - "src/vs/base/common/observableInternal/index.ts"
         - "src/vs/platform/list/browser/listService.ts"
@@ -397,12 +400,18 @@ llm:
 # ──────────────────────────────────────────────
 rag:
   enabled: true
-  top_k: 5
+  top_k: 3
+  min_relevance: 0.5
+  max_chunks_per_source: 2
+  lexical_weight: 0.3
   documentation_paths:
     - "README.md"
     - "CONTRIBUTING.md"
     - ".github/instructions/"
     - "wiki/"
+    - "AGENTS.md"
+    - "CLAUDE.md"
+    - "**/AGENTS.md"
   architectural_docs:
     - "ARCHITECTURE.md"
     - ".github/instructions/source-code-organization.instructions.md"
