@@ -14,8 +14,8 @@
 #     unless FORCE=1 is set.
 #
 # File naming (unchanged):
-#   pr<NUMBER>_rag.json / pr<NUMBER>_rag.log
-#   pr<NUMBER>_no_rag.json / pr<NUMBER>_no_rag.log
+#   pr<NUMBER>[<OUT_SUFFIX>]_rag.json / .log
+#   pr<NUMBER>[<OUT_SUFFIX>]_no_rag.json / .log
 
 set -euo pipefail
 
@@ -24,14 +24,21 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 URLS_GLOB_NAME="pr_urls2.txt"
 FORCE="${FORCE:-0}"
+# Optional suffixes for A/B re-runs:
+#   FAISS_SUFFIX=_v2      -> use faiss_index_<repo>_v2 instead of faiss_index_<repo>
+#   OUT_SUFFIX=_tuned     -> write pr<N>_tuned_rag.json instead of pr<N>_rag.json
+# The suffix is inserted before _rag/_no_rag so exp/aggregate_reports.py still
+# pairs the two modes, while the label keeps the two runs apart.
+FAISS_SUFFIX="${FAISS_SUFFIX:-}"
+OUT_SUFFIX="${OUT_SUFFIX:-}"
 
 # ── repo → experiment config mapping ──────────────────────────────────────────
 # Add a new line here if you add another repository to the experiment.
 # Format:  ["owner/repo"]="<output-dir>|<rag-config>|<no-rag-config>|<faiss-index-path>"
 declare -A REPO_CONFIG
-REPO_CONFIG["home-assistant/core"]="$SCRIPT_DIR/home-assistant|$SCRIPT_DIR/home-assistant/.acr-config.yml|$SCRIPT_DIR/home-assistant/.acr-config-no-rag.yml|$PROJECT_ROOT/faiss_index_home_assistant"
-REPO_CONFIG["microsoft/vscode"]="$SCRIPT_DIR/vscode|$SCRIPT_DIR/vscode/.acr-config.yml|$SCRIPT_DIR/vscode/.acr-config-no-rag.yml|$PROJECT_ROOT/faiss_index_vscode"
-REPO_CONFIG["getsentry/sentry"]="$SCRIPT_DIR/sentry|$SCRIPT_DIR/sentry/.acr-config.yml|$SCRIPT_DIR/sentry/.acr-config-no-rag.yml|$PROJECT_ROOT/faiss_index_sentry"
+REPO_CONFIG["home-assistant/core"]="$SCRIPT_DIR/home-assistant|$SCRIPT_DIR/home-assistant/.acr-config.yml|$SCRIPT_DIR/home-assistant/.acr-config-no-rag.yml|$PROJECT_ROOT/faiss_index_home_assistant${FAISS_SUFFIX}"
+REPO_CONFIG["microsoft/vscode"]="$SCRIPT_DIR/vscode|$SCRIPT_DIR/vscode/.acr-config.yml|$SCRIPT_DIR/vscode/.acr-config-no-rag.yml|$PROJECT_ROOT/faiss_index_vscode${FAISS_SUFFIX}"
+REPO_CONFIG["getsentry/sentry"]="$SCRIPT_DIR/sentry|$SCRIPT_DIR/sentry/.acr-config.yml|$SCRIPT_DIR/sentry/.acr-config-no-rag.yml|$PROJECT_ROOT/faiss_index_sentry${FAISS_SUFFIX}"
 
 # ── collect URL files ─────────────────────────────────────────────────────────
 URL_FILES=()
@@ -153,16 +160,16 @@ for urls_file in "${URL_FILES[@]}"; do
       "$pr_url" \
       "$cfg_rag" \
       "$faiss_path" \
-      "$out_dir/pr${pr_number}_rag.json" \
-      "$out_dir/pr${pr_number}_rag.log" \
+      "$out_dir/pr${pr_number}${OUT_SUFFIX}_rag.json" \
+      "$out_dir/pr${pr_number}${OUT_SUFFIX}_rag.log" \
       "RAG" || pr_failed=1
 
     run_eval \
       "$pr_url" \
       "$cfg_no_rag" \
       "$faiss_path" \
-      "$out_dir/pr${pr_number}_no_rag.json" \
-      "$out_dir/pr${pr_number}_no_rag.log" \
+      "$out_dir/pr${pr_number}${OUT_SUFFIX}_no_rag.json" \
+      "$out_dir/pr${pr_number}${OUT_SUFFIX}_no_rag.log" \
       "no-RAG" || pr_failed=1
 
     if [[ $pr_failed -eq 0 ]]; then

@@ -55,6 +55,9 @@ class FAISSStore(EmbeddingStore):
         
         # Lazy load embedding model
         self._embedding_model = None
+        # Cached answer to "does the model emit unit-length vectors?" (see
+        # _similarity_from_distance); None until first probed.
+        self._unit_norm_embeddings: Optional[bool] = None
 
         # Lightweight accounting for experimental evaluation
         self.stats: dict[str, int] = {
@@ -159,6 +162,41 @@ class FAISSStore(EmbeddingStore):
         }
         self.retrieval_log = []
 
+    def _similarity_from_distance(self, distance: float) -> float:
+        """Convert a FAISS L2 distance into a calibrated cosine similarity.
+
+        The sentence-transformers models used here (e.g. all-MiniLM-L6-v2) end in a
+        Normalize layer, so stored vectors are unit length and the exact identity
+        ``cos = 1 - d^2 / 2`` holds. That matters: the previous ``1 / (1 + d)``
+        mapping squashed the whole usable range into ~0.4-0.6, so a cosine of 0.17
+        and a cosine of 0.55 both looked like "relevance ~0.5" and no useful
+        threshold could be set on the result.
+
+        Falls back to the old monotonic mapping when the vectors are not unit
+        length, where the cosine identity would not hold.
+        """
+        if not self._vectors_are_unit_norm():
+            return 1.0 / (1.0 + distance)
+        cosine = 1.0 - (distance * distance) / 2.0
+        return max(0.0, min(1.0, cosine))
+
+    def _vectors_are_unit_norm(self) -> bool:
+        """Whether the embedding model emits unit-length vectors (cached)."""
+        if self._unit_norm_embeddings is None:
+            try:
+                probe = self.embedding_model.encode(["unit norm probe"])[0]
+                norm = float(np.linalg.norm(probe))  # type: ignore
+                self._unit_norm_embeddings = abs(norm - 1.0) < 1e-3
+                if not self._unit_norm_embeddings:
+                    logger.warning(
+                        f"Embedding vectors are not unit length (norm={norm:.4f}); "
+                        "falling back to uncalibrated similarity scores"
+                    )
+            except Exception as e:  # pragma: no cover - model load failure
+                logger.warning(f"Could not probe embedding norm: {e}")
+                return False
+        return bool(self._unit_norm_embeddings)
+
     def _embed_text(self, text: str) -> np.ndarray:  # type: ignore
         """Generate embedding for text (also counts approximate tokens)."""
         self.stats["embedding_tokens"] += approx_token_count(text)
@@ -199,8 +237,21 @@ class FAISSStore(EmbeddingStore):
         query: str,
         top_k: int = 5,
         filters: Optional[dict[str, str]] = None,
+        min_relevance: float = 0.0,
+        max_per_source: Optional[int] = None,
     ) -> list[CodeContext]:
-        """Search for similar code contexts."""
+        """Search for similar code contexts.
+
+        Args:
+            query: text to embed and search for
+            top_k: maximum number of contexts to return
+            filters: metadata filters (source / repo / exclude_pr_number / ...)
+            min_relevance: drop contexts whose cosine similarity is below this
+                floor. Prevents near-unrelated chunks from being injected into
+                the prompt, which costs tokens and degrades generation.
+            max_per_source: at most this many contexts from any single source
+                PR, so one loosely-matching PR cannot fill the whole budget.
+        """
         try:
             if self.index is None or self.index.ntotal == 0:
                 logger.warning("No documents indexed yet")
@@ -210,8 +261,9 @@ class FAISSStore(EmbeddingStore):
             query_embedding = self._embed_text(query)
             
             requested_k = min(max(int(top_k), 1), int(self.index.ntotal))
-            # Over-fetch so we can apply metadata filters after ANN search
-            search_k = min(max(requested_k * 5, requested_k), int(self.index.ntotal))
+            # Over-fetch so we can apply metadata filters, the relevance floor and
+            # the per-source cap after the ANN search and still fill the budget.
+            search_k = min(max(requested_k * 10, requested_k), int(self.index.ntotal))
 
             source_filter = None
             exclude_pr_number = None
@@ -239,6 +291,9 @@ class FAISSStore(EmbeddingStore):
             
             # Build CodeContext results
             contexts = []
+            per_source_counts: dict[str, int] = {}
+            dropped_below_floor = 0
+            dropped_by_source_cap = 0
             for distance, idx in zip(distances[0], indices[0]):
                 if idx < len(self.documents):
                     doc = self.documents[idx]
@@ -257,11 +312,23 @@ class FAISSStore(EmbeddingStore):
 
                     if exclude_pr_number and doc.get("pr_number") == exclude_pr_number:
                         continue
-                    
-                    # Convert L2 distance to similarity score (0-1)
-                    # Lower distance = higher similarity
-                    similarity = 1.0 / (1.0 + float(distance))
-                    
+
+                    similarity = self._similarity_from_distance(float(distance))
+
+                    # Relevance floor: a chunk that is only loosely related costs
+                    # prompt tokens and pulls the model off-target, so drop it.
+                    if similarity < min_relevance:
+                        dropped_below_floor += 1
+                        continue
+
+                    # Diversity: never let one historical PR dominate the context.
+                    source_key = str(doc.get("pr_number") or doc.get("filename") or doc.get("source"))
+                    if max_per_source is not None:
+                        if per_source_counts.get(source_key, 0) >= max_per_source:
+                            dropped_by_source_cap += 1
+                            continue
+                        per_source_counts[source_key] = per_source_counts.get(source_key, 0) + 1
+
                     context = CodeContext(
                         content=doc["content"],
                         source=doc["source"],
@@ -272,10 +339,21 @@ class FAISSStore(EmbeddingStore):
                     if len(contexts) >= requested_k:
                         break
 
+            if dropped_below_floor or dropped_by_source_cap:
+                logger.info(
+                    f"Retrieval filtered candidates: {dropped_below_floor} below "
+                    f"relevance floor {min_relevance:.2f}, {dropped_by_source_cap} "
+                    f"over per-source cap {max_per_source}"
+                )
+
             self.stats["retrieved_chunks"] += len(contexts)
             self.retrieval_log.append({
                 "query": query[:600],
                 "filters": filters,
+                "min_relevance": min_relevance,
+                "max_per_source": max_per_source,
+                "dropped_below_floor": dropped_below_floor,
+                "dropped_by_source_cap": dropped_by_source_cap,
                 "returned": [
                     {
                         "source": c.source,

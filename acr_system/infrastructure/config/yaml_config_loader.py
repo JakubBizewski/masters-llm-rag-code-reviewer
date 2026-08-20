@@ -92,9 +92,12 @@ class YAMLConfigLoader(ConfigRepository):
                     rag_data = pattern_data["rag_config"]
                     rag_config = RAGConfig(
                         enabled=rag_data.get("enabled", True),
-                        top_k=rag_data.get("top_k", 5),
+                        top_k=rag_data.get("top_k", 3),
                         documentation_paths=rag_data.get("documentation_paths", []),
                         architectural_docs=rag_data.get("architectural_docs", []),
+                        min_relevance=rag_data.get("min_relevance", 0.5),
+                        max_chunks_per_source=rag_data.get("max_chunks_per_source", 2),
+                        lexical_weight=rag_data.get("lexical_weight", 0.3),
                     )
                 
                 pattern = FilePatternRule(
@@ -119,9 +122,12 @@ class YAMLConfigLoader(ConfigRepository):
             rag_data = data.get("rag", {})
             rag_config = RAGConfig(
                 enabled=rag_data.get("enabled", True),
-                top_k=rag_data.get("top_k", 5),
+                top_k=rag_data.get("top_k", 3),
                 documentation_paths=rag_data.get("documentation_paths", []),
                 architectural_docs=rag_data.get("architectural_docs", []),
+                min_relevance=rag_data.get("min_relevance", 0.5),
+                max_chunks_per_source=rag_data.get("max_chunks_per_source", 2),
+                lexical_weight=rag_data.get("lexical_weight", 0.3),
             )
             
             # Parse impact analysis config

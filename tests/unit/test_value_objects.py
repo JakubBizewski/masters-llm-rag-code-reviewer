@@ -152,8 +152,14 @@ class TestRAGConfig:
         """Test default values for RAG config."""
         config = RAGConfig()
         assert config.enabled is True
-        assert config.top_k == 5
+        # Deliberately small: injecting many loosely-related chunks degrades
+        # generation quality more than it helps.
+        assert config.top_k == 3
         assert config.documentation_paths == []
+        # Retrieval-quality controls are on by default.
+        assert config.min_relevance == 0.5
+        assert config.max_chunks_per_source == 2
+        assert config.lexical_weight == 0.3
     
     def test_invalid_top_k_raises_error(self):
         """Test that invalid top_k raises ValueError."""

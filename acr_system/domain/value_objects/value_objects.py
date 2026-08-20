@@ -167,10 +167,23 @@ class RAGConfig:
     """RAG configuration (global or per file pattern)."""
     
     enabled: bool = True
-    top_k: int = 5
+    # Retrieval breadth. Kept small on purpose: injecting more than a handful of
+    # chunks measurably degrades generation quality once the extra chunks are only
+    # loosely related to the hunk under review.
+    top_k: int = 3
     documentation_paths: Optional[List[str]] = None
     architectural_docs: Optional[List[str]] = None
-    
+    # Minimum cosine similarity a chunk must reach to be injected into the prompt.
+    # Chunks below the floor are dropped; if nothing clears it, no RAG context is
+    # added at all and the prompt is identical to a no-RAG run.
+    min_relevance: float = 0.5
+    # Cap on how many chunks may come from the same historical PR, so a single
+    # loosely-matching PR cannot fill the whole context budget.
+    max_chunks_per_source: int = 2
+    # Weight of the lexical (identifier-overlap) signal when reranking candidates.
+    # 0.0 = pure embedding similarity, 1.0 = pure lexical overlap.
+    lexical_weight: float = 0.3
+
     def __post_init__(self) -> None:
         if self.documentation_paths is None:
             self.documentation_paths = []
@@ -179,6 +192,12 @@ class RAGConfig:
         
         if self.top_k < 1:
             raise ValueError("top_k must be positive")
+        if not 0.0 <= self.min_relevance <= 1.0:
+            raise ValueError("min_relevance must be between 0.0 and 1.0")
+        if self.max_chunks_per_source < 1:
+            raise ValueError("max_chunks_per_source must be positive")
+        if not 0.0 <= self.lexical_weight <= 1.0:
+            raise ValueError("lexical_weight must be between 0.0 and 1.0")
 
 
 @dataclass(frozen=True)

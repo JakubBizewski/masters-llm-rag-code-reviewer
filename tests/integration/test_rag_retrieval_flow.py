@@ -84,7 +84,7 @@ async def test_rag_retrieval_with_relevant_documentation(
         )
     ]
 
-    mock_embedding_store.search_similar.side_effect = [docs_results, history_results]
+    mock_embedding_store.search_similar.side_effect = [docs_results, history_results, []]
     
     # === Build context ===
     context_builder = ContextBuilder(
@@ -106,7 +106,7 @@ async def test_rag_retrieval_with_relevant_documentation(
     # === Assertions ===
     
     # 1. RAG search was called
-    assert mock_embedding_store.search_similar.call_count == 2
+    assert mock_embedding_store.search_similar.call_count == 3
     
     # 2. Query contains relevant information
     first_call = mock_embedding_store.search_similar.call_args_list[0]
@@ -126,9 +126,12 @@ async def test_rag_retrieval_with_relevant_documentation(
     history_contexts = [c for c in context if c.source == "pr_history"]
     assert len(history_contexts) == 1
     
-    # 5. Results are sorted by relevance
-    scores = [c.relevance_score for c in rag_contexts]
-    assert scores == sorted(scores, reverse=True), "Results should be sorted by relevance"
+    # 5. All retrieved results survived reranking.
+    # Ordering is by blended embedding-similarity + identifier-overlap score rather
+    # than raw relevance_score (see tests/unit/test_rag_retrieval_quality.py:
+    # test_rerank_prefers_chunks_sharing_identifiers_with_the_hunk), so the raw
+    # scores are no longer guaranteed to be monotonically decreasing.
+    assert len(rag_contexts) == 3
     
     # 6. Surrounding code context is also included
     surrounding_contexts = [c for c in context if c.source == "surrounding_code"]
@@ -172,7 +175,7 @@ async def test_rag_retrieval_with_no_relevant_results(
     
     # === Mock responses ===
     mock_vcs_repository.get_file_content.return_value = "def helper():\n    pass"
-    mock_embedding_store.search_similar.side_effect = [[], []]  # docs + history: no results
+    mock_embedding_store.search_similar.side_effect = [[], [], []]  # general + history + documentation: no results
     
     # === Build context ===
     context_builder = ContextBuilder(
@@ -191,7 +194,7 @@ async def test_rag_retrieval_with_no_relevant_results(
     # === Assertions ===
     
     # 1. RAG was attempted
-    assert mock_embedding_store.search_similar.call_count == 2
+    assert mock_embedding_store.search_similar.call_count == 3
     
     # 2. Context is not empty (has surrounding code)
     assert len(context) >= 0, "Context should be valid even without RAG results"
@@ -321,7 +324,7 @@ async def test_rag_retrieval_with_multiple_languages(
     ]
 
     # Two calls per hunk: docs + history
-    mock_embedding_store.search_similar.side_effect = [python_docs, []]
+    mock_embedding_store.search_similar.side_effect = [python_docs, [], []]
     
     python_context = await context_builder.build_context(
         diff_hunk=python_hunk,
@@ -330,7 +333,7 @@ async def test_rag_retrieval_with_multiple_languages(
     )
     
     # Verify Python RAG was called
-    assert mock_embedding_store.search_similar.call_count == 2
+    assert mock_embedding_store.search_similar.call_count == 3
     python_query = mock_embedding_store.search_similar.call_args_list[0].kwargs['query']
     assert "api.py" in python_query
     
@@ -359,7 +362,7 @@ async def test_rag_retrieval_with_multiple_languages(
         )
     ]
 
-    mock_embedding_store.search_similar.side_effect = [js_docs, []]
+    mock_embedding_store.search_similar.side_effect = [js_docs, [], []]
     
     js_context = await context_builder.build_context(
         diff_hunk=js_hunk,
@@ -368,8 +371,8 @@ async def test_rag_retrieval_with_multiple_languages(
     )
     
     # Verify JavaScript RAG was called
-    assert mock_embedding_store.search_similar.call_count == 4
-    js_query = mock_embedding_store.search_similar.call_args_list[2].kwargs['query']
+    assert mock_embedding_store.search_similar.call_count == 6
+    js_query = mock_embedding_store.search_similar.call_args_list[3].kwargs['query']
     assert "app.js" in js_query
     
     # === Assertions ===
@@ -429,7 +432,7 @@ async def test_rag_retrieval_with_similarity_threshold(
         # Low relevance results filtered by adapter (not included)
     ]
 
-    mock_embedding_store.search_similar.side_effect = [docs_results, []]
+    mock_embedding_store.search_similar.side_effect = [docs_results, [], []]
     
     context_builder = ContextBuilder(
         embedding_store=mock_embedding_store,
@@ -497,7 +500,7 @@ async def test_rag_retrieval_query_construction(
     )
     
     mock_vcs_repository.get_file_content.return_value = "# Database queries"
-    mock_embedding_store.search_similar.side_effect = [[], []]
+    mock_embedding_store.search_similar.side_effect = [[], [], []]
     
     context_builder = ContextBuilder(
         embedding_store=mock_embedding_store,
@@ -513,7 +516,7 @@ async def test_rag_retrieval_query_construction(
     )
     
     # === Assertions on query construction ===
-    assert mock_embedding_store.search_similar.call_count == 2
+    assert mock_embedding_store.search_similar.call_count == 3
     
     first_call = mock_embedding_store.search_similar.call_args_list[0]
     query = first_call.kwargs['query']

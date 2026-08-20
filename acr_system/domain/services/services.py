@@ -65,26 +65,56 @@ class ContextBuilder:
             rag_results = await self.embedding_store.search_similar(
                 query=query,
                 top_k=rag_config.top_k,
+                min_relevance=rag_config.min_relevance,
+                max_per_source=rag_config.max_chunks_per_source,
             )
-            context.extend(rag_results)
 
             # Also retrieve similar historical PR changes (diff + discussion)
             history_results = await self.embedding_store.search_similar(
                 query=query,
-                top_k=min(3, rag_config.top_k),
+                top_k=min(2, rag_config.top_k),
                 filters={
                     "source": "pr_history",
                     "repo": pr.repository,
                     "exclude_pr_number": str(pr.pr_number),
                 },
+                min_relevance=rag_config.min_relevance,
+                max_per_source=rag_config.max_chunks_per_source,
             )
 
-            # Avoid duplicating identical contexts
-            existing_contents = {c.content for c in context}
-            for item in history_results:
-                if item.content not in existing_contents:
-                    context.append(item)
-                    existing_contents.add(item.content)
+            # Documentation gets its own retrieval call. Without it, project
+            # convention docs are hopelessly outnumbered in the index by historical
+            # PR threads and effectively never surface, which is exactly what the
+            # first evaluation batch showed: zero documentation chunks retrieved
+            # across 1070 hits.
+            doc_results = await self.embedding_store.search_similar(
+                query=query,
+                top_k=min(2, rag_config.top_k),
+                filters={"source": "documentation"},
+                min_relevance=rag_config.min_relevance,
+            )
+
+            # Merge, drop duplicates, rerank on relevance + lexical overlap with the
+            # hunk, then keep only the strongest top_k. If nothing survives, no RAG
+            # context is injected at all: an empty context is strictly better than a
+            # loosely-related one, and makes the prompt identical to a no-RAG run.
+            retrieved: List[CodeContext] = []
+            seen_contents: set[str] = set()
+            for item in list(doc_results) + list(rag_results) + list(history_results):
+                if item.content in seen_contents:
+                    continue
+                seen_contents.add(item.content)
+                retrieved.append(item)
+
+            selected = self._rerank_contexts(retrieved, query, rag_config)
+            if selected:
+                context.extend(selected)
+            else:
+                logger.info(
+                    f"No retrieved context cleared the relevance floor "
+                    f"({rag_config.min_relevance:.2f}) for "
+                    f"{diff_hunk.file_path.value}; reviewing without RAG context"
+                )
         
         # Add surrounding code context
         surrounding_context = await self._get_surrounding_context(diff_hunk, pr)
@@ -97,19 +127,113 @@ class ContextBuilder:
         
         return context
     
+    # Ranking bonus applied to documentation chunks during reranking.
+    DOCUMENTATION_RANK_BONUS = 0.05
+    # Number of changed lines fed into the retrieval query. Ten was too few to
+    # characterise a hunk: for many hunks the query was a single import line, which
+    # matches essentially anything in the index.
+    QUERY_MAX_CHANGED_LINES = 30
+    # Identifiers that carry no discriminative signal in a retrieval query.
+    _QUERY_STOP_TOKENS = frozenset({
+        "the", "and", "for", "not", "with", "this", "that", "from", "import",
+        "return", "const", "let", "var", "def", "class", "self", "true", "false",
+        "none", "null", "if", "else", "async", "await", "await_", "function",
+    })
+
     def _build_rag_query(self, diff_hunk: DiffHunk) -> str:
         """Build search query for RAG from diff hunk."""
         # Extract key information from diff for better RAG retrieval
         lines = diff_hunk.content.split('\n')
         
-        # Focus on added lines (they contain new code to review)
+        # Focus on added lines (they contain new code to review), but keep a few
+        # removed lines too: what a change replaced is often what makes it findable.
         added_lines = [line[1:] for line in lines if line.startswith('+') and not line.startswith('+++')]
-        
+        removed_lines = [line[1:] for line in lines if line.startswith('-') and not line.startswith('---')]
+
         query = f"File: {diff_hunk.file_path.value}\n"
         query += f"Language: {diff_hunk.language.name}\n"
-        query += "Changes:\n" + '\n'.join(added_lines[:10])  # Limit to first 10 lines
-        
+        query += "Changes:\n" + '\n'.join(added_lines[:self.QUERY_MAX_CHANGED_LINES])
+        if removed_lines:
+            query += "\nReplaced:\n" + '\n'.join(
+                removed_lines[:max(5, self.QUERY_MAX_CHANGED_LINES // 3)]
+            )
+
+        # Symbols are what make a hunk identifiable across PRs, so state them
+        # explicitly instead of relying on them surviving the mean-pooled embedding.
+        symbols = self._extract_identifiers('\n'.join(added_lines + removed_lines))
+        if symbols:
+            query += "\nSymbols: " + ", ".join(sorted(symbols)[:20])
+
         return query
+
+    def _extract_identifiers(self, text: str) -> set:
+        """Extract discriminative identifiers (function/class/variable names)."""
+        import re
+
+        tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", text)
+        out = set()
+        for token in tokens:
+            lowered = token.lower()
+            if lowered in self._QUERY_STOP_TOKENS:
+                continue
+            out.add(token)
+            # camelCase / snake_case parts retrieve better than the whole symbol
+            for part in re.split(r"_|(?<=[a-z0-9])(?=[A-Z])", token):
+                if len(part) > 2 and part.lower() not in self._QUERY_STOP_TOKENS:
+                    out.add(part)
+        return out
+
+    def _lexical_overlap(self, query_identifiers: set, content: str) -> float:
+        """Fraction of the hunk's identifiers that also appear in a context chunk.
+
+        Embedding similarity alone cannot tell "same subsystem" from "same general
+        topic"; shared identifiers can. Used only to rerank candidates that already
+        cleared the relevance floor.
+        """
+        if not query_identifiers:
+            return 0.0
+        content_identifiers = self._extract_identifiers(content)
+        if not content_identifiers:
+            return 0.0
+        shared = query_identifiers & content_identifiers
+        return len(shared) / len(query_identifiers)
+
+    def _rerank_contexts(
+        self,
+        contexts: List[CodeContext],
+        query: str,
+        rag_config: RAGConfig,
+    ) -> List[CodeContext]:
+        """Rerank retrieved contexts and keep the strongest top_k.
+
+        Score is a blend of the calibrated embedding similarity and the identifier
+        overlap with the hunk, so a chunk that merely shares vocabulary with the
+        file loses to one that mentions the same symbols.
+        """
+        if not contexts:
+            return []
+
+        query_identifiers = self._extract_identifiers(query)
+        weight = rag_config.lexical_weight
+        scored = []
+        for ctx in contexts:
+            lexical = self._lexical_overlap(query_identifiers, ctx.content)
+            blended = (1.0 - weight) * ctx.relevance_score + weight * lexical
+            # Documentation states project conventions explicitly, which is what
+            # human reviewers cite and what a diff-only reviewer cannot know.
+            if ctx.source == "documentation":
+                blended += self.DOCUMENTATION_RANK_BONUS
+            scored.append((blended, lexical, ctx))
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        selected = [ctx for _, _, ctx in scored[: rag_config.top_k]]
+        for blended, lexical, ctx in scored[: rag_config.top_k]:
+            logger.info(
+                f"Selected context from {ctx.source}: similarity="
+                f"{ctx.relevance_score:.3f} lexical_overlap={lexical:.3f} "
+                f"blended={blended:.3f}"
+            )
+        return selected
     
     async def _get_surrounding_context(
         self,

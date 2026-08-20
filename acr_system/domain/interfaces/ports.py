@@ -182,8 +182,14 @@ class EmbeddingStore(ABC):
         query: str,
         top_k: int = 5,
         filters: Optional[Dict[str, str]] = None,
+        min_relevance: float = 0.0,
+        max_per_source: Optional[int] = None,
     ) -> List[CodeContext]:
-        """Search for similar code contexts."""
+        """Search for similar code contexts.
+
+        Implementations must drop contexts scoring below min_relevance and, when
+        max_per_source is set, return at most that many contexts per source PR.
+        """
         pass
     
     @abstractmethod

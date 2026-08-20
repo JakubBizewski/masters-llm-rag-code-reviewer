@@ -72,6 +72,131 @@ def index_history(repo: str, max_prs: int, provider: Optional[str], faiss_index_
     asyncio.run(_index_history_async(repo, max_prs, chosen_provider, faiss_index_path))
 
 
+@cli.command("index-docs")
+@click.option("--repo-path", required=True, type=click.Path(exists=True, file_okay=False), help="Local checkout of the repository to read documentation from")
+@click.option("--config-path", required=True, type=click.Path(exists=True, dir_okay=False), help="Path to YAML config file (its documentation_paths / architectural_docs are indexed)")
+@click.option("--faiss-index-path", default=None, help="Path for the FAISS index (overrides RAG_FAISS_INDEX_PATH env var)")
+@click.option("--max-chars", default=1500, show_default=True, type=int, help="Chunk size in characters")
+def index_docs(repo_path: str, config_path: str, faiss_index_path: Optional[str], max_chars: int) -> None:
+    """Index project documentation and architectural docs for RAG retrieval.
+
+    The config's documentation_paths and architectural_docs entries were previously
+    inert: nothing ever fed them to the embedding store, so retrieval could only
+    ever return historical PR threads. This command reads them from a local
+    checkout, chunks them and adds them to the FAISS index alongside PR history.
+    """
+    asyncio.run(_index_docs_async(repo_path, config_path, faiss_index_path, max_chars))
+
+
+async def _index_docs_async(
+    repo_path: str,
+    config_path: str,
+    faiss_index_path: Optional[str],
+    max_chars: int,
+) -> None:
+    from datetime import datetime, timezone
+
+    from acr_system.domain.entities.entities import ArchitecturalDocument
+
+    root = Path(repo_path)
+    config_loader = FileYAMLConfigLoader(config_path=config_path)
+    project_config = await config_loader.load_config(repo="local", ref="local")
+
+    # Collect the configured doc locations, globally and per file pattern.
+    configured: list[str] = []
+    rag_configs = [project_config.rag_config] + [
+        p.rag_config for p in project_config.file_patterns if p.rag_config
+    ]
+    for rc in rag_configs:
+        if not rc:
+            continue
+        configured.extend(rc.documentation_paths or [])
+        configured.extend(rc.architectural_docs or [])
+
+    if not configured:
+        click.echo("No documentation_paths / architectural_docs configured — nothing to index.")
+        return
+
+    DOC_SUFFIXES = {".md", ".rst", ".txt", ".mdx"}
+    files: list[Path] = []
+    seen: set[Path] = set()
+    for entry in configured:
+        target = root / entry
+        candidates: list[Path] = []
+        if target.is_file():
+            candidates = [target]
+        elif target.is_dir():
+            candidates = [f for f in sorted(target.rglob("*")) if f.is_file()]
+        else:
+            candidates = [f for f in sorted(root.glob(entry)) if f.is_file()]
+        for f in candidates:
+            if f.suffix.lower() in DOC_SUFFIXES and f not in seen:
+                seen.add(f)
+                files.append(f)
+
+    if not files:
+        click.echo(f"None of the {len(configured)} configured doc locations resolved to readable files under {root}.")
+        return
+
+    documents: list[ArchitecturalDocument] = []
+    now = datetime.now(timezone.utc)
+    for f in files:
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace").strip()
+        except Exception as e:
+            logger.warning(f"Skipping {f}: {e}")
+            continue
+        if not text:
+            continue
+        rel = f.relative_to(root).as_posix()
+        for i, chunk in enumerate(_chunk_markdown(text, max_chars)):
+            documents.append(
+                ArchitecturalDocument(
+                    filename=f"{rel}#{i}" if i else rel,
+                    content=f"Project documentation: {rel}\n\n{chunk}",
+                    last_modified=now,
+                )
+            )
+
+    rag_store = FAISSStore(storage_path=faiss_index_path)
+    before = rag_store.index.ntotal if rag_store.index is not None else 0
+    await rag_store.index_documents(documents)
+    after = rag_store.index.ntotal if rag_store.index is not None else 0
+
+    click.echo(
+        f"Indexed {len(documents)} documentation chunks from {len(files)} file(s); "
+        f"index grew {before} -> {after} vectors."
+    )
+
+
+def _chunk_markdown(text: str, max_chars: int) -> list[str]:
+    """Split docs on markdown headings, then hard-wrap oversized sections.
+
+    Heading-aligned chunks retrieve better than fixed windows because a convention
+    ("use runtime_data, not hass.data") stays together with the heading that names it.
+    """
+    lines = text.split("\n")
+    sections: list[list[str]] = [[]]
+    for line in lines:
+        if line.startswith("#") and sections[-1]:
+            sections.append([])
+        sections[-1].append(line)
+
+    chunks: list[str] = []
+    for section in sections:
+        body = "\n".join(section).strip()
+        if not body:
+            continue
+        if len(body) <= max_chars:
+            chunks.append(body)
+            continue
+        for start in range(0, len(body), max_chars):
+            piece = body[start : start + max_chars].strip()
+            if piece:
+                chunks.append(piece)
+    return chunks
+
+
 @cli.command("evaluate")
 @click.option("--pr-url", required=True, help="PR/MR URL (GitHub/GitLab)")
 @click.option("--config-path", required=True, type=click.Path(exists=True, dir_okay=False), help="Path to YAML config file")
